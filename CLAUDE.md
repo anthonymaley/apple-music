@@ -16,6 +16,8 @@ Use semver in all three locations (keep in sync):
 ## Project Structure
 
 ```
-skills/apple-music/SKILL.md   # the skill definition
+skills/apple-music/SKILL.md   # conversational skill (complex requests)
+commands/                      # slash commands (quick controls)
+scripts/statusline.sh          # status line script (now playing)
 .claude-plugin/                # plugin.json and marketplace.json
 ```
