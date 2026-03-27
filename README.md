@@ -16,8 +16,11 @@ Everything runs through AppleScript (`osascript`) — no extra dependencies.
 
 ## Install
 
-```bash
-claude install gh:anthonymaley/music
+In Claude Code, run:
+
+```
+/plugin marketplace add anthonymaley/music
+/plugin install music@music
 ```
 
 ## Usage
