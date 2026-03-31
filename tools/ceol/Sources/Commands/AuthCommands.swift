@@ -15,13 +15,7 @@ struct AuthOpen: ParsableCommand {
         let auth = AuthManager()
         let token = try auth.requireDeveloperToken()
         let page = AuthPage()
-        let path = try page.generate(developerToken: token)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = [path]
-        try process.run()
-        process.waitUntilExit()
-        print("Browser opened. Sign in, then run: ceol auth set-token <TOKEN>")
+        try page.serve(developerToken: token)
     }
 }
 
