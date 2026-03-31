@@ -1,6 +1,7 @@
 import Foundation
 
 struct AuthPage {
+    /// Write the auth HTML and return the file path.
     func generate(developerToken: String) throws -> String {
         let path = NSString(string: "~/.config/ceol/auth.html").expandingTildeInPath
         let html = """
@@ -44,5 +45,39 @@ struct AuthPage {
         try FileManager.default.createDirectory(atPath: AuthManager.configDir, withIntermediateDirectories: true)
         try html.write(toFile: path, atomically: true, encoding: .utf8)
         return path
+    }
+
+    /// Serve the auth page on localhost via Python HTTP server, open browser, wait for user.
+    /// MusicKit JS requires an HTTP origin (file:// URLs are rejected by Apple's auth server).
+    func serve(developerToken: String) throws {
+        let htmlPath = try generate(developerToken: developerToken)
+        let dir = (htmlPath as NSString).deletingLastPathComponent
+        let filename = (htmlPath as NSString).lastPathComponent
+        let port = 8537
+
+        // Start Python HTTP server in background
+        let server = Process()
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        server.arguments = ["-m", "http.server", "\(port)", "--bind", "127.0.0.1", "--directory", dir]
+        server.standardOutput = FileHandle.nullDevice
+        server.standardError = FileHandle.nullDevice
+        try server.run()
+
+        // Give server time to bind
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // Open browser to localhost
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = ["http://localhost:\(port)/\(filename)"]
+        try open.run()
+        open.waitUntilExit()
+
+        print("Auth page served at http://localhost:\(port)/\(filename)")
+        print("Sign in, copy the token, then run: ceol auth set-token <TOKEN>")
+        print("")
+        print("Press Enter to stop the server...")
+        _ = readLine()
+        server.terminate()
     }
 }
