@@ -4,6 +4,7 @@ import Foundation
 struct Play: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Play or resume music.")
 
+    @Argument(help: "Playlist name, result index, or 'shuffle'") var args: [String] = []
     @Option(name: .long, help: "Playlist name") var playlist: String?
     @Option(name: .long, help: "Song name") var song: String?
     @Option(name: .long, help: "Artist name") var artist: String?
@@ -13,6 +14,7 @@ struct Play: ParsableCommand {
         let backend = AppleScriptBackend()
         let output = OutputFormat(mode: json ? .json : .human)
 
+        // Existing flag-based behavior takes priority
         if let playlist = playlist {
             let result = try syncRun {
                 try await backend.runMusic("""
@@ -25,7 +27,10 @@ struct Play: ParsableCommand {
             if parts.count >= 2 {
                 print(output.render(["track": String(parts[0]), "artist": String(parts[1]), "playlist": playlist]))
             }
-        } else if let song = song {
+            return
+        }
+
+        if let song = song {
             let artistFilter = artist.map { " and artist contains \"\($0)\"" } ?? ""
             let result = try syncRun {
                 try await backend.runMusic("""
@@ -47,17 +52,77 @@ struct Play: ParsableCommand {
             if parts.count >= 2 {
                 print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
             }
-        } else {
+            return
+        }
+
+        // Smart positional args
+        if !args.isEmpty {
+            // Single integer → play from cache
+            if args.count == 1, let index = Int(args[0]) {
+                let cache = ResultCache()
+                let song = try cache.lookupSong(index: index)
+                let escapedTitle = song.title.replacingOccurrences(of: "\"", with: "\\\"")
+                let escapedArtist = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
+                let result = try syncRun {
+                    try await backend.runMusic("""
+                        set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
+                        if (count of results) = 0 then
+                            set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
+                        end if
+                        if (count of results) > 0 then
+                            play item 1 of results
+                            return name of current track & "|" & artist of current track
+                        else
+                            return "NOT_FOUND"
+                        end if
+                    """)
+                }
+                let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed == "NOT_FOUND" {
+                    print("'\(song.title)' not in library. Run: music add \(index)")
+                    throw ExitCode.failure
+                }
+                let parts = trimmed.split(separator: "|")
+                if parts.count >= 2 {
+                    print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
+                }
+                return
+            }
+
+            // Check for trailing "shuffle" keyword
+            let hasShuffle = args.last?.lowercased() == "shuffle"
+            let nameArgs = hasShuffle ? Array(args.dropLast()) : args
+            let playlistName = nameArgs.joined(separator: " ")
+
+            if hasShuffle {
+                _ = try syncRun {
+                    try await backend.runMusic("set shuffle enabled to true")
+                }
+            }
+
             let result = try syncRun {
                 try await backend.runMusic("""
-                    play
+                    play playlist "\(playlistName)"
                     return name of current track & "|" & artist of current track
                 """)
             }
             let parts = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|")
             if parts.count >= 2 {
-                print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
+                print(output.render(["track": String(parts[0]), "artist": String(parts[1]), "playlist": playlistName]))
             }
+            return
+        }
+
+        // No args → resume
+        let result = try syncRun {
+            try await backend.runMusic("""
+                play
+                return name of current track & "|" & artist of current track
+            """)
+        }
+        let parts = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|")
+        if parts.count >= 2 {
+            print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
         }
     }
 }
