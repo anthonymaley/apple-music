@@ -16,7 +16,7 @@ The music CLI has two backends:
 ## Playback (no auth)
 
 ```bash
-music play                                    # resume
+music play                                    # resume (shows now playing + speakers)
 music play "Working Vibes"                    # play a playlist by name
 music play "Working Vibes" shuffle            # play with shuffle
 music play 3                                  # play result #3 from last search
@@ -118,7 +118,7 @@ music mix --artists "Fouk,Floating Points" --count 20 --name "Friday Mix"  # mix
 
 ## Result Cache
 
-Search, similar, suggest, and new-releases write results to `~/.config/music/last-songs.json`. Speaker list writes to `last-speakers.json`. Follow-up commands reference results by index:
+Search, similar, suggest, new-releases, and playlist tracks write results to `~/.config/music/last-songs.json`. Speaker list writes to `last-speakers.json`. Follow-up commands reference results by index:
 
 ```bash
 music search "house"        # results cached as 1, 2, 3...

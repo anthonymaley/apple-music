@@ -2,7 +2,7 @@ import Foundation
 
 struct MultiSelectItem {
     let label: String
-    let sublabel: String
+    var sublabel: String
     var selected: Bool
 }
 
@@ -19,7 +19,8 @@ func runMultiSelectList(
     title: String,
     items: inout [MultiSelectItem],
     actions: [(key: Character, label: String, action: (Int, [Int]) -> MultiSelectAction)] = [],
-    onToggle: ((Int, Bool) -> Void)? = nil
+    onToggle: ((Int, Bool) -> Void)? = nil,
+    onAdjust: ((Int, Int) -> String)? = nil  // (index, delta) -> new sublabel
 ) -> MultiSelectAction {
     let terminal = TerminalState.shared
     terminal.enterRawMode()
@@ -63,18 +64,24 @@ func runMultiSelectList(
 
         // Footer
         let selected = selectedIndices()
-        out += "\n  \(ANSICode.dim)╭─────────────────────────────────────────────╮\(ANSICode.reset)\n"
-        out += "  \(ANSICode.dim)│\(ANSICode.reset) ↑↓ navigate  ␣ select  ⏎ confirm  q quit \(ANSICode.dim)│\(ANSICode.reset)\n"
+        let hasAdjust = onAdjust != nil
+        let footerWidth = hasAdjust ? 55 : 45
+        out += "\n  \(ANSICode.dim)╭\(String(repeating: "─", count: footerWidth))╮\(ANSICode.reset)\n"
+        let navHints = hasAdjust
+            ? "↑↓ navigate  ␣ select  ←→ volume  ⏎ confirm  q quit"
+            : "↑↓ navigate  ␣ select  ⏎ confirm  q quit"
+        let pad = String(repeating: " ", count: max(0, footerWidth - navHints.count))
+        out += "  \(ANSICode.dim)│\(ANSICode.reset) \(navHints)\(pad) \(ANSICode.dim)│\(ANSICode.reset)\n"
         if !actions.isEmpty {
             var actionLine = "  \(ANSICode.dim)│\(ANSICode.reset) "
             for a in actions {
                 actionLine += "\(ANSICode.cyan)\(a.key)\(ANSICode.reset) \(a.label)  "
             }
-            actionLine += String(repeating: " ", count: max(0, 45 - actions.reduce(0) { $0 + 4 + $1.label.count }))
+            actionLine += String(repeating: " ", count: max(0, footerWidth - actions.reduce(0) { $0 + 4 + $1.label.count }))
             actionLine += "\(ANSICode.dim)│\(ANSICode.reset)"
             out += actionLine + "\n"
         }
-        out += "  \(ANSICode.dim)╰─────────────────────────────────────────────╯\(ANSICode.reset)\n"
+        out += "  \(ANSICode.dim)╰\(String(repeating: "─", count: footerWidth))╯\(ANSICode.reset)\n"
         if !selected.isEmpty {
             out += "  \(ANSICode.green)\(selected.count) selected\(ANSICode.reset)\n"
         }
@@ -95,6 +102,14 @@ func runMultiSelectList(
         case .space:
             items[cursor].selected.toggle()
             onToggle?(cursor, items[cursor].selected)
+        case .left:
+            if let onAdjust = onAdjust {
+                items[cursor].sublabel = onAdjust(cursor, -5)
+            }
+        case .right:
+            if let onAdjust = onAdjust {
+                items[cursor].sublabel = onAdjust(cursor, 5)
+            }
         case .char("q"), .escape:
             return .cancelled
         case .enter:

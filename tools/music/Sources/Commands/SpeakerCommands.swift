@@ -123,23 +123,32 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
 
 private func runSpeakerTUI() throws {
     let devices = try fetchSpeakerDevices()
+    var volumes = devices.map { $0["volume"] as! Int }
     var items = devices.map {
         MultiSelectItem(label: $0["name"] as! String, sublabel: "vol: \($0["volume"]!)", selected: $0["selected"] as! Bool)
     }
 
     let backend = AppleScriptBackend()
     let result = runMultiSelectList(title: "AirPlay Speakers", items: &items, onToggle: { idx, selected in
-        let name = items[idx].label
+        let name = devices[idx]["name"] as! String
         _ = try? syncRun {
             try await backend.runMusic("set selected of AirPlay device \"\(name)\" to \(selected)")
         }
+    }, onAdjust: { idx, delta in
+        volumes[idx] = min(100, max(0, volumes[idx] + delta))
+        let name = devices[idx]["name"] as! String
+        let vol = volumes[idx]
+        _ = try? syncRun {
+            try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(vol)")
+        }
+        return "vol: \(vol)"
     })
 
     switch result {
     case .confirmed(let indices):
         let cache = ResultCache()
         let speakerResults = items.enumerated().map { (i, item) in
-            SpeakerResult(index: i + 1, name: item.label, selected: indices.contains(i), volume: 0)
+            SpeakerResult(index: i + 1, name: item.label, selected: indices.contains(i), volume: volumes[i])
         }
         try? cache.writeSpeakers(speakerResults)
         let activeNames = indices.map { items[$0].label }
@@ -147,7 +156,7 @@ private func runSpeakerTUI() throws {
     case .cancelled:
         let cache = ResultCache()
         let speakerResults = items.enumerated().map { (i, item) in
-            SpeakerResult(index: i + 1, name: item.label, selected: item.selected, volume: 0)
+            SpeakerResult(index: i + 1, name: item.label, selected: item.selected, volume: volumes[i])
         }
         try? cache.writeSpeakers(speakerResults)
     default:
