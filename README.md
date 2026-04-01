@@ -11,6 +11,71 @@
 
 Control Apple Music, AirPlay speakers, and AirPods — right from your terminal.
 
+```
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                                                                     │
+  │  you:  Go find the latest deep house tracks, put them in a          │
+  │        playlist, shuffle it on the kitchen at 60%, and list         │
+  │        the tracks here for me.                                      │
+  │                                                                     │
+  │  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐  │
+  │    music search "deep house 2026" --limit 15                       │
+  │  │ music playlist create "Deep House Finds"                      │  │
+  │    music playlist add "Deep House Finds" "Silhouette" "Kerri C"    │
+  │  │ music playlist add "Deep House Finds" "Night Ride" "Fouk"     │  │
+  │    ...                                                             │
+  │  │ music speaker set Kitchen                                     │  │
+  │    music volume Kitchen 60                                         │
+  │  │ music shuffle on                                              │  │
+  │    music play --playlist "Deep House Finds"                        │
+  │  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  │
+  │                                                                     │
+  │  claude:  ▶ Playing Deep House Finds on Kitchen [60]                │
+  │                                                                     │
+  │    ┌────┬──────────────────────┬──────────────────┬───────┐         │
+  │    │  # │ Track                │ Artist           │ Album │         │
+  │    ├────┼──────────────────────┼──────────────────┼───────┤         │
+  │    │  1 │ Silhouette           │ Kerri Chandler   │ ...   │         │
+  │    │  2 │ Night Ride           │ Fouk             │ ...   │         │
+  │    │  3 │ Body Movement        │ DJ Seinfeld      │ ...   │         │
+  │    │  4 │ Midnight Sun         │ Jimpster         │ ...   │         │
+  │    │  5 │ Inner City Blues     │ Moodymann        │ ...   │         │
+  │    │ .. │ ...                  │ ...              │ ...   │         │
+  │    └────┴──────────────────────┴──────────────────┴───────┘         │
+  │                                                                     │
+  │  you:  It's great. Share it with Julie on iMessage.                 │
+  │  claude:  ✓ Shared "Deep House Finds" with Julie via iMessage.      │
+  │                                                                     │
+  ├─────────────────────────────────────────────────────────────────────┤
+  │  ▶ Silhouette — Kerri Chandler  ·  Kitchen [60]                    │
+  └─────────────────────────────────────────────────────────────────────┘
+```
+
+## What You Can Do
+
+Just talk to Claude. These are real examples — not slash commands, just natural language:
+
+```
+> Look at the Working Vibes playlist. See the last ten tracks on that
+  playlist. Make a separate playlist with those ten tracks and shuffle
+  them. Play it on the kitchen and Sonos Arc at 60%.
+
+> Take the current track and search for new records that match this
+  style. Put them in a playlist and shuffle them.
+
+> It's great. Share it with Julie on iMessage.
+
+> Go find the latest deep house tracks. Play them on a playlist and
+  shuffle it, but also list the tracks in an ASCII table here in
+  Claude Code for me to see. Play them in the kitchen at 60% volume.
+
+> Switch to my AirPods and turn it down to 30.
+
+> Add the bedroom to the group and turn the kitchen down to 40.
+```
+
+Claude handles the multi-step orchestration — searching the catalog, creating playlists, routing to speakers, setting volume, sharing — all from one sentence.
+
 All commands start with **`/music:`** — type `/music:` and tab to discover them.
 
 ## Install
@@ -130,16 +195,7 @@ Every command runs instantly — no AI reasoning, no chat clutter.
 
 ## Natural Language
 
-For anything more complex, just talk to Claude. No commands to memorize.
-
-```
-> play some Daft Punk on the kitchen speaker
-> add the living room to the group and turn it down to 40
-> play my top 25 most played and list the tracks
-> find me something like what's playing and make a playlist
-> what's new from Radiohead?
-> make me a mix from Fouk and Floating Points
-```
+Slash commands handle quick actions. For anything multi-step, just talk — Claude composes the right sequence of CLI calls automatically. See [What You Can Do](#what-you-can-do) above for examples.
 
 ## Status Line
 
