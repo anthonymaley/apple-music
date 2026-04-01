@@ -5,6 +5,7 @@ struct Playlist: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Manage playlists.",
         subcommands: [
+            PlaylistBrowse.self,
             PlaylistList.self,
             PlaylistTracks.self,
             PlaylistCreate.self,
@@ -15,8 +16,38 @@ struct Playlist: ParsableCommand {
             PlaylistTemp.self,
             PlaylistCreateFrom.self,
             PlaylistCleanup.self,
-        ]
+        ],
+        defaultSubcommand: PlaylistBrowse.self
     )
+}
+
+struct PlaylistBrowse: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "", abstract: "Browse playlists interactively.", shouldDisplay: false)
+
+    func run() throws {
+        guard isTTY() else {
+            try PlaylistList().run()
+            return
+        }
+
+        let backend = AppleScriptBackend()
+        let result = try syncRun {
+            try await backend.runMusic("get name of every user playlist")
+        }
+        let names = result.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        guard !names.isEmpty else {
+            print("No playlists found.")
+            return
+        }
+
+        if let selected = runListPicker(title: "Playlists", items: names) {
+            let playlistName = names[selected]
+            try PlaylistTracks(name: playlistName, json: false).run()
+        }
+    }
 }
 
 struct PlaylistList: ParsableCommand {
@@ -66,6 +97,11 @@ struct PlaylistTracks: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "tracks", abstract: "List tracks in a playlist.")
     @Argument(help: "Playlist name") var name: String
     @Flag(name: .long, help: "Output JSON") var json = false
+    init() {}
+    init(name: String, json: Bool) {
+        self._name = Argument(wrappedValue: name)
+        self._json = Flag(wrappedValue: json)
+    }
     func run() throws {
         let auth = AuthManager()
         if let devToken = try? auth.requireDeveloperToken(), let userToken = auth.userToken() {
@@ -146,11 +182,13 @@ struct PlaylistTracks: ParsableCommand {
 struct PlaylistCreate: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "create", abstract: "Create a playlist.")
     @Argument(help: "Playlist name") var name: String
+    @Argument(help: "Result indices to add (from last search/similar)") var indices: [Int] = []
     func run() throws {
         let auth = AuthManager()
         let devToken = try auth.requireDeveloperToken()
         let userToken = try auth.requireUserToken()
         let api = RESTAPIBackend(developerToken: devToken, userToken: userToken, storefront: auth.storefront())
+        let backend = AppleScriptBackend()
 
         let body: [String: Any] = ["attributes": ["name": name]]
         let bodyData = try JSONSerialization.data(withJSONObject: body)
@@ -158,7 +196,47 @@ struct PlaylistCreate: ParsableCommand {
         guard (200...299).contains(status) else {
             throw APIError.requestFailed(status)
         }
-        print("Created playlist '\(name)'.")
+
+        if indices.isEmpty {
+            print("Created playlist '\(name)'.")
+            return
+        }
+
+        let cache = ResultCache()
+        var addedCount = 0
+        var ids: [String] = []
+        for idx in indices {
+            if let song = try? cache.lookupSong(index: idx) {
+                ids.append(song.catalogId)
+            }
+        }
+
+        if !ids.isEmpty {
+            try syncRun { try await api.addToLibrary(songIDs: ids) }
+            try syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
+
+            for idx in indices {
+                if let song = try? cache.lookupSong(index: idx) {
+                    let et = song.title.replacingOccurrences(of: "\"", with: "\\\"")
+                    let ea = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
+                    _ = try? syncRun {
+                        try await backend.runMusic("""
+                            set results to (every track of playlist "Library" whose name is "\(et)" and artist is "\(ea)")
+                            if (count of results) = 0 then
+                                set results to (every track of playlist "Library" whose name contains "\(et)" and artist contains "\(ea)")
+                            end if
+                            if (count of results) > 0 then
+                                duplicate item 1 of results to playlist "\(name)"
+                            end if
+                        """)
+                    }
+                    addedCount += 1
+                    print("  + \(song.title) — \(song.artist)")
+                }
+            }
+        }
+
+        print("Created '\(name)' with \(addedCount) tracks.")
     }
 }
 
@@ -175,50 +253,83 @@ struct PlaylistDelete: ParsableCommand {
 }
 
 struct PlaylistAdd: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "add", abstract: "Add a track to playlist(s).")
-    @Argument(help: "Playlist name(s), comma-separated for multiple") var playlists: String
-    @Argument(help: "Song title") var title: String
-    @Argument(help: "Artist name") var artist: String?
+    static let configuration = CommandConfiguration(commandName: "add", abstract: "Add track(s) to playlist.")
+    @Argument(help: "Playlist name") var playlist: String
+    @Argument(help: "Song title or result indices") var items: [String] = []
     func run() throws {
         let auth = AuthManager()
         let devToken = try auth.requireDeveloperToken()
         let userToken = try auth.requireUserToken()
         let api = RESTAPIBackend(developerToken: devToken, userToken: userToken, storefront: auth.storefront())
+        let backend = AppleScriptBackend()
+
+        let ints = items.compactMap { Int($0) }
+        if ints.count == items.count && !ints.isEmpty {
+            let cache = ResultCache()
+            var ids: [String] = []
+            var songs: [SongResult] = []
+            for idx in ints {
+                if let song = try? cache.lookupSong(index: idx) {
+                    ids.append(song.catalogId)
+                    songs.append(song)
+                }
+            }
+
+            if !ids.isEmpty {
+                try syncRun { try await api.addToLibrary(songIDs: ids) }
+                try syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
+
+                for song in songs {
+                    let et = song.title.replacingOccurrences(of: "\"", with: "\\\"")
+                    let ea = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
+                    _ = try? syncRun {
+                        try await backend.runMusic("""
+                            set results to (every track of playlist "Library" whose name is "\(et)" and artist is "\(ea)")
+                            if (count of results) = 0 then
+                                set results to (every track of playlist "Library" whose name contains "\(et)" and artist contains "\(ea)")
+                            end if
+                            if (count of results) > 0 then
+                                duplicate item 1 of results to playlist "\(playlist)"
+                            end if
+                        """)
+                    }
+                    print("  + \(song.title) — \(song.artist)")
+                }
+                print("Added \(songs.count) track(s) to '\(playlist)'.")
+            }
+            return
+        }
+
+        let title = items.first ?? ""
+        let artist: String? = items.count > 1 ? items.dropFirst().joined(separator: " ") : nil
 
         var searchQuery = title
         if let artist = artist { searchQuery += " \(artist)" }
 
-        let songs = try syncRun { try await api.searchSongs(query: searchQuery, limit: 1) }
-        guard let song = songs.first else {
+        let foundSongs = try syncRun { try await api.searchSongs(query: searchQuery, limit: 1) }
+        guard let song = foundSongs.first else {
             print("No results for '\(searchQuery)'")
             throw ExitCode.failure
         }
         print("Found: \(song.title) — \(song.artist)")
 
         try syncRun { try await api.addToLibrary(songIDs: [song.id]) }
-
-        let backend = AppleScriptBackend()
-        let playlistNames = playlists.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-
-        // Give library a moment to sync
         try syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
 
         let escapedTitle = song.title.replacingOccurrences(of: "\"", with: "\\\"")
         let escapedArtist = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
-        for pl in playlistNames {
-            _ = try syncRun {
-                try await backend.runMusic("""
-                    set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
-                    if (count of results) = 0 then
-                        set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
-                    end if
-                    if (count of results) > 0 then
-                        duplicate item 1 of results to playlist "\(pl)"
-                    end if
-                """)
-            }
-            print("Added to '\(pl)'.")
+        _ = try syncRun {
+            try await backend.runMusic("""
+                set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
+                if (count of results) = 0 then
+                    set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
+                end if
+                if (count of results) > 0 then
+                    duplicate item 1 of results to playlist "\(playlist)"
+                end if
+            """)
         }
+        print("Added to '\(playlist)'.")
     }
 }
 
