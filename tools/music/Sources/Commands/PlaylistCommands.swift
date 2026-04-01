@@ -45,7 +45,28 @@ struct PlaylistBrowse: ParsableCommand {
 
         if let selected = runListPicker(title: "Playlists", items: names) {
             let playlistName = names[selected]
-            try showPlaylistTracks(name: playlistName, json: false)
+            var actionItems = [
+                MultiSelectItem(label: "List tracks", sublabel: "", selected: false),
+                MultiSelectItem(label: "Shuffle play", sublabel: "", selected: false),
+                MultiSelectItem(label: "Play in order", sublabel: "", selected: false),
+            ]
+            let result = runMultiSelectList(title: playlistName, items: &actionItems)
+
+            guard case .confirmed(let indices) = result else { return }
+            let chosen = Set(indices)
+
+            // Play first (so tracks list appears after playback starts)
+            if chosen.contains(1) {
+                _ = try syncRun { try await backend.runMusic("set shuffle enabled to true") }
+                _ = try syncRun { try await backend.runMusic("play playlist \"\(playlistName)\"") }
+            } else if chosen.contains(2) {
+                _ = try syncRun { try await backend.runMusic("set shuffle enabled to false") }
+                _ = try syncRun { try await backend.runMusic("play playlist \"\(playlistName)\"") }
+            }
+
+            if chosen.contains(0) {
+                try showPlaylistTracks(name: playlistName, json: false)
+            }
         }
     }
 }
@@ -134,9 +155,23 @@ func showPlaylistTracks(name: String, json: Bool) throws {
                             "number": i + 1,
                             "track": attrs["name"] as? String ?? "Unknown",
                             "artist": attrs["artistName"] as? String ?? "Unknown",
-                            "album": attrs["albumName"] as? String ?? ""
+                            "album": attrs["albumName"] as? String ?? "",
+                            "catalogId": (item["attributes"] as? [String: Any])?["playParams"] as? [String: Any] != nil
+                                ? ((item["attributes"] as? [String: Any])?["playParams"] as? [String: Any])?["catalogId"] as? String ?? ""
+                                : ""
                         ]
                     }
+                    let cache = ResultCache()
+                    let songResults = tracks.map { t in
+                        SongResult(
+                            index: t["number"] as! Int,
+                            title: t["track"] as! String,
+                            artist: t["artist"] as! String,
+                            album: t["album"] as! String,
+                            catalogId: t["catalogId"] as? String ?? ""
+                        )
+                    }
+                    try? cache.writeSongs(songResults)
                     if json {
                         let output = OutputFormat(mode: .json)
                         print(output.render(["playlist": name, "tracks": tracks]))
@@ -168,20 +203,27 @@ func showPlaylistTracks(name: String, json: Bool) throws {
     }
     let lines = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n")
 
+    let parsedTracks: [(num: Int, title: String, artist: String, album: String)] = lines.compactMap { line in
+        let parts = line.split(separator: "|", maxSplits: 3).map(String.init)
+        guard parts.count >= 4 else { return nil }
+        return (num: Int(parts[0]) ?? 0, title: parts[1], artist: parts[2], album: parts[3])
+    }
+
+    let cache = ResultCache()
+    let songResults = parsedTracks.map { t in
+        SongResult(index: t.num, title: t.title, artist: t.artist, album: t.album, catalogId: "")
+    }
+    try? cache.writeSongs(songResults)
+
     if json {
-        let tracks: [[String: Any]] = lines.compactMap { line in
-            let parts = line.split(separator: "|", maxSplits: 3).map(String.init)
-            guard parts.count >= 4 else { return nil }
-            return ["number": Int(parts[0]) ?? 0, "track": parts[1], "artist": parts[2], "album": parts[3]]
+        let tracks: [[String: Any]] = parsedTracks.map { t in
+            ["number": t.num, "track": t.title, "artist": t.artist, "album": t.album]
         }
         let output = OutputFormat(mode: .json)
         print(output.render(["playlist": name, "tracks": tracks]))
     } else {
-        for line in lines {
-            let parts = line.split(separator: "|", maxSplits: 3).map(String.init)
-            if parts.count >= 4 {
-                print("\(parts[0]). \(parts[1]) — \(parts[2]) [\(parts[3])]")
-            }
+        for t in parsedTracks {
+            print("\(t.num). \(t.title) — \(t.artist) [\(t.album)]")
         }
     }
 }

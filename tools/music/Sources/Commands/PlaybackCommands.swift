@@ -12,21 +12,16 @@ struct Play: ParsableCommand {
 
     func run() throws {
         let backend = AppleScriptBackend()
-        let output = OutputFormat(mode: json ? .json : .human)
 
         // Existing flag-based behavior takes priority
         if let playlist = playlist {
-            let result = try syncRun {
+            _ = try syncRun {
                 try await backend.runMusic("""
                     set shuffle enabled to true
                     play playlist "\(playlist)"
-                    return name of current track & "|" & artist of current track
                 """)
             }
-            let parts = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|")
-            if parts.count >= 2 {
-                print(output.render(["track": String(parts[0]), "artist": String(parts[1]), "playlist": playlist]))
-            }
+            showNowPlaying(json: json, waitForPlay: true)
             return
         }
 
@@ -37,21 +32,17 @@ struct Play: ParsableCommand {
                     set results to (every track of playlist "Library" whose name contains "\(song)"\(artistFilter))
                     if (count of results) > 0 then
                         play item 1 of results
-                        return name of current track & "|" & artist of current track
+                        return "OK"
                     else
                         return "NOT_FOUND"
                     end if
                 """)
             }
-            let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed == "NOT_FOUND" {
+            if result.trimmingCharacters(in: .whitespacesAndNewlines) == "NOT_FOUND" {
                 print("No tracks found matching '\(song)'")
                 throw ExitCode.failure
             }
-            let parts = trimmed.split(separator: "|")
-            if parts.count >= 2 {
-                print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
-            }
+            showNowPlaying(json: json, waitForPlay: true)
             return
         }
 
@@ -71,21 +62,17 @@ struct Play: ParsableCommand {
                         end if
                         if (count of results) > 0 then
                             play item 1 of results
-                            return name of current track & "|" & artist of current track
+                            return "OK"
                         else
                             return "NOT_FOUND"
                         end if
                     """)
                 }
-                let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed == "NOT_FOUND" {
+                if result.trimmingCharacters(in: .whitespacesAndNewlines) == "NOT_FOUND" {
                     print("'\(song.title)' not in library. Run: music add \(index)")
                     throw ExitCode.failure
                 }
-                let parts = trimmed.split(separator: "|")
-                if parts.count >= 2 {
-                    print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
-                }
+                showNowPlaying(json: json, waitForPlay: true)
                 return
             }
 
@@ -100,30 +87,18 @@ struct Play: ParsableCommand {
                 }
             }
 
-            let result = try syncRun {
-                try await backend.runMusic("""
-                    play playlist "\(playlistName)"
-                    return name of current track & "|" & artist of current track
-                """)
+            _ = try syncRun {
+                try await backend.runMusic("play playlist \"\(playlistName)\"")
             }
-            let parts = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|")
-            if parts.count >= 2 {
-                print(output.render(["track": String(parts[0]), "artist": String(parts[1]), "playlist": playlistName]))
-            }
+            showNowPlaying(json: json, waitForPlay: true)
             return
         }
 
         // No args → resume
-        let result = try syncRun {
-            try await backend.runMusic("""
-                play
-                return name of current track & "|" & artist of current track
-            """)
+        _ = try syncRun {
+            try await backend.runMusic("play")
         }
-        let parts = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|")
-        if parts.count >= 2 {
-            print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
-        }
+        showNowPlaying(json: json, waitForPlay: true)
     }
 }
 
@@ -141,17 +116,8 @@ struct Skip: ParsableCommand {
     @Flag(name: .long, help: "Output JSON") var json = false
     func run() throws {
         let backend = AppleScriptBackend()
-        let result = try syncRun {
-            try await backend.runMusic("""
-                next track
-                return name of current track & "|" & artist of current track
-            """)
-        }
-        let output = OutputFormat(mode: json ? .json : .human)
-        let parts = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|")
-        if parts.count >= 2 {
-            print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
-        }
+        _ = try syncRun { try await backend.runMusic("next track") }
+        showNowPlaying(json: json, waitForPlay: true)
     }
 }
 
@@ -160,17 +126,8 @@ struct Back: ParsableCommand {
     @Flag(name: .long, help: "Output JSON") var json = false
     func run() throws {
         let backend = AppleScriptBackend()
-        let result = try syncRun {
-            try await backend.runMusic("""
-                previous track
-                return name of current track & "|" & artist of current track
-            """)
-        }
-        let output = OutputFormat(mode: json ? .json : .human)
-        let parts = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|")
-        if parts.count >= 2 {
-            print(output.render(["track": String(parts[0]), "artist": String(parts[1])]))
-        }
+        _ = try syncRun { try await backend.runMusic("previous track") }
+        showNowPlaying(json: json, waitForPlay: true)
     }
 }
 
@@ -187,55 +144,73 @@ struct Now: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Show what's currently playing.")
     @Flag(name: .long, help: "Output JSON") var json = false
     func run() throws {
-        let backend = AppleScriptBackend()
-        let result = try syncRun {
-            try await backend.runMusic("""
-                set state to player state as text
-                if state is "stopped" then
-                    return "STOPPED"
-                end if
-                set t to name of current track
-                set a to artist of current track
-                set al to album of current track
-                set d to duration of current track
-                set p to player position
-                set spk to ""
-                set deviceList to every AirPlay device
-                repeat with dev in deviceList
-                    if selected of dev then
-                        if spk is not "" then set spk to spk & ","
-                        set spk to spk & name of dev & ":" & sound volume of dev
+        showNowPlaying(json: json)
+    }
+}
+
+func showNowPlaying(json: Bool = false, waitForPlay: Bool = false) {
+    let backend = AppleScriptBackend()
+    let stoppedCheck = waitForPlay ? """
+                    if state is "stopped" then
+                        error "waiting for playback"
                     end if
-                end repeat
-                return t & "|" & a & "|" & al & "|" & (round d) & "|" & (round p) & "|" & state & "|" & spk
-            """)
-        }
-        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == "STOPPED" {
-            print(json ? "{\"state\":\"stopped\"}" : "Nothing playing.")
-            return
-        }
-        let parts = trimmed.split(separator: "|", maxSplits: 6).map(String.init)
-        guard parts.count >= 7 else { print("Unexpected output"); return }
+    """ : """
+                    if state is "stopped" then
+                        return "STOPPED"
+                    end if
+    """
+    guard let result = try? syncRun({
+        try await backend.runMusic("""
+            repeat 10 times
+                try
+                    set state to player state as text
+                    \(stoppedCheck)
+                    set t to name of current track
+                    set a to artist of current track
+                    set al to album of current track
+                    set d to duration of current track
+                    set p to player position
+                    set spk to ""
+                    set deviceList to every AirPlay device
+                    repeat with dev in deviceList
+                        if selected of dev then
+                            if spk is not "" then set spk to spk & ","
+                            set spk to spk & name of dev & ":" & sound volume of dev
+                        end if
+                    end repeat
+                    return t & "|" & a & "|" & al & "|" & (round d) & "|" & (round p) & "|" & state & "|" & spk
+                end try
+                delay 0.3
+            end repeat
+            return "LOADING"
+        """)
+    }) else { return }
 
-        let speakers = parts[6].split(separator: ",").map { pair -> [String: Any] in
-            let kv = pair.split(separator: ":", maxSplits: 1)
-            return ["name": String(kv[0]), "volume": Int(kv.count > 1 ? String(kv[1]) : "0") ?? 0]
-        }
+    let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed == "STOPPED" {
+        print(json ? "{\"state\":\"stopped\"}" : "Nothing playing.")
+        return
+    }
+    let parts = trimmed.split(separator: "|", maxSplits: 6).map(String.init)
+    guard parts.count >= 7 else { print("Unexpected output"); return }
 
-        if json {
-            let dict: [String: Any] = [
-                "track": parts[0], "artist": parts[1], "album": parts[2],
-                "duration": Int(parts[3]) ?? 0, "position": Int(parts[4]) ?? 0,
-                "state": parts[5], "speakers": speakers
-            ]
-            let output = OutputFormat(mode: .json)
-            print(output.render(dict))
-        } else {
-            let spkStr = speakers.map { "\($0["name"]!) (vol: \($0["volume"]!))" }.joined(separator: " | ")
-            print("\(parts[0]) — \(parts[1]) [\(parts[2])]")
-            if !spkStr.isEmpty { print(spkStr) }
-        }
+    let speakers = parts[6].split(separator: ",").map { pair -> [String: Any] in
+        let kv = pair.split(separator: ":", maxSplits: 1)
+        return ["name": String(kv[0]), "volume": Int(kv.count > 1 ? String(kv[1]) : "0") ?? 0]
+    }
+
+    if json {
+        let dict: [String: Any] = [
+            "track": parts[0], "artist": parts[1], "album": parts[2],
+            "duration": Int(parts[3]) ?? 0, "position": Int(parts[4]) ?? 0,
+            "state": parts[5], "speakers": speakers
+        ]
+        let output = OutputFormat(mode: .json)
+        print(output.render(dict))
+    } else {
+        let spkStr = speakers.map { "\($0["name"]!) (vol: \($0["volume"]!))" }.joined(separator: " | ")
+        print("\(parts[0]) — \(parts[1]) [\(parts[2])]")
+        if !spkStr.isEmpty { print(spkStr) }
     }
 }
 

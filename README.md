@@ -142,7 +142,7 @@ Every command runs instantly. No AI reasoning, no token cost.
 
 | Command | What it does |
 |---------|-------------|
-| `/music:speaker` | Interactive picker: browse, toggle with spacebar |
+| `/music:speaker` | Interactive picker: toggle speakers, adjust volume with ←→ |
 | `/music:speaker list` | List all AirPlay devices |
 | `/music:speaker kitchen` | Add kitchen to active speakers |
 | `/music:speaker kitchen 40` | Add kitchen and set volume to 40 |
@@ -164,7 +164,7 @@ Every command runs instantly. No AI reasoning, no token cost.
 
 | Command | What it does | Setup |
 |---------|-------------|-------|
-| `/music:playlist` | Interactive browser: pick a playlist, see tracks | none |
+| `/music:playlist` | Interactive browser: pick a playlist, then list/shuffle/play | none |
 | `/music:playlist list` | List all your playlists | none |
 | `/music:playlist tracks Working Vibes` | Show tracks in a playlist | none |
 | `/music:playlist create Friday Mix` | Create an empty playlist | advanced |
@@ -190,19 +190,41 @@ Every command runs instantly. No AI reasoning, no token cost.
 
 Commands that browse lists launch a terminal UI when you run them with no arguments. Arrow keys to navigate, spacebar to select, letter keys for actions.
 
-```
-  AirPlay Speakers
-
-   ✓  1. Anthony's MacBook Pro — vol: 15
-   ✓  2. Kitchen — vol: 60
-      3. Living Room — vol: 60
-      4. Bedroom — vol: 60
-
-  ↑↓ navigate  ␣ select  q quit  (2 selected)
-```
+**Speaker picker** — toggle speakers on/off with space, adjust volume with ←→:
 
 ```
-  Volume Mixer
+  ♫  AirPlay Speakers
+
+ ▸ ●  1. Anthony's MacBook Pro
+      vol: 25
+   ●  2. Kitchen
+      vol: 40
+   ○  3. Living Room
+      vol: 40
+
+  ╭───────────────────────────────────────────────────────╮
+  │ ↑↓ navigate  ␣ select  ←→ volume  ⏎ confirm  q quit  │
+  ╰───────────────────────────────────────────────────────╯
+```
+
+**Playlist browser** — pick a playlist, then choose actions (list tracks, shuffle play, play in order):
+
+```
+  ♫  Working Vibes
+
+ ▸ ○  List tracks
+   ●  Shuffle play
+   ○  Play in order
+
+  ╭─────────────────────────────────────────────╮
+  │ ↑↓ navigate  ␣ select  ⏎ confirm  q quit    │
+  ╰─────────────────────────────────────────────╯
+```
+
+**Volume mixer** — per-speaker volume bars with ←→ adjust:
+
+```
+  ♫  Volume Mixer
 
   Kitchen        [████████████░░░░░░░░] 60%
   MacBook Pro    [███░░░░░░░░░░░░░░░░░] 15%
@@ -261,7 +283,7 @@ The plugin routes through the `music` CLI when installed. Without it, playback a
        └──► AppleScript (fallback when music CLI not installed)
 ```
 
-Search results are cached locally (`~/.config/music/last-songs.json`). When you run `music search` or `music similar`, the numbered results persist so you can reference them by index in follow-up commands like `music play 3` or `music add 3 --to "House"`.
+Search results are cached locally (`~/.config/music/last-songs.json`). When you run `music search`, `music similar`, or view playlist tracks, the numbered results persist so you can reference them by index in follow-up commands like `music play 3` or `music add 3 --to "House"`. Play commands show full now-playing info (track, album, speakers) after starting playback.
 
 Speaker lists work the same way (`~/.config/music/last-speakers.json`). Run `music speaker list`, then `music speaker 1 2 5` to add speakers by their numbers.
 

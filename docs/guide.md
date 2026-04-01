@@ -46,7 +46,7 @@ Every slash command has `disable-model-invocation: true` — they execute immedi
 **Speakers**
 
 ```
-/music:speaker                   Interactive picker (TUI)
+/music:speaker                   Interactive picker (TUI) — toggle + ←→ volume
 /music:speaker list              List all AirPlay devices
 /music:speaker kitchen           Add kitchen to active speakers
 /music:speaker kitchen 40        Add kitchen and set volume to 40
@@ -80,7 +80,7 @@ music remove                     Remove current song from current playlist
 **Playlists** (requires music CLI + auth)
 
 ```
-/music:playlist                  Interactive browser (TUI)
+/music:playlist                  Interactive browser (TUI) — list/shuffle/play
 /music:playlist list             List all your playlists
 /music:playlist tracks Working Vibes    Show tracks in a playlist
 /music:playlist create Friday Mix       Create an empty playlist
@@ -336,6 +336,8 @@ music auth status
 | `MusicLibrary.add()` missing | iOS-only API | Library writes go through REST API |
 | Library sync delay | REST writes take 1-3s to appear in AppleScript | LibrarySync model polls and retries |
 | AirPods apostrophe | Names like "Anthony's AirPods Pro" break quoting | Speaker commands use fuzzy matching |
+| Play shows "Nothing playing" | AppleScript `current track` unavailable during cold start | Retry loop waits up to 3s for track to load |
+| ArgumentParser crash on bare invocation | Property wrappers crash when read on directly-constructed structs | Shared logic extracted to standalone functions |
 
 ## Version
 
