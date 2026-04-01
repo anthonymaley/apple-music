@@ -25,6 +25,12 @@ struct Search: ParsableCommand {
             throw ExitCode.failure
         }
 
+        let cache = ResultCache()
+        let songResults = songs.enumerated().map { (i, song) in
+            SongResult(index: i + 1, title: song.title, artist: song.artist, album: song.album, catalogId: song.id)
+        }
+        try? cache.writeSongs(songResults)
+
         if json {
             let output = OutputFormat(mode: .json)
             print(output.render(songs.map { $0.toDict() }))

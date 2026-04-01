@@ -75,6 +75,12 @@ struct Similar: ParsableCommand {
             }
         }
 
+        let cache = ResultCache()
+        let songResults = similar.prefix(limit).enumerated().map { (i, song) in
+            SongResult(index: i + 1, title: song.title, artist: song.artist, album: song.album, catalogId: song.id)
+        }
+        try? cache.writeSongs(songResults)
+
         let output = OutputFormat(mode: json ? .json : .human)
         if json {
             print(output.render(similar.prefix(limit).map { $0.toDict() }))
@@ -158,6 +164,12 @@ struct Suggest: ParsableCommand {
         let seedSet = Set(seedSongIDs)
         let suggestions = allSongs.filter { !seedSet.contains($0.id) }.prefix(count)
 
+        let cache = ResultCache()
+        let songResults = suggestions.enumerated().map { (i, song) in
+            SongResult(index: i + 1, title: song.title, artist: song.artist, album: song.album, catalogId: song.id)
+        }
+        try? cache.writeSongs(songResults)
+
         let output = OutputFormat(mode: json ? .json : .human)
         if json {
             print(output.render(suggestions.map { $0.toDict() }))
@@ -227,6 +239,12 @@ struct NewReleases: ParsableCommand {
                 }
             }
         }
+
+        let cache = ResultCache()
+        let songResults = releases.prefix(limit).enumerated().map { (i, r) in
+            SongResult(index: i + 1, title: r.title, artist: r.artist, album: r.album, catalogId: r.id)
+        }
+        try? cache.writeSongs(songResults)
 
         let output = OutputFormat(mode: json ? .json : .human)
         if json {
