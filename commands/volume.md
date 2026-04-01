@@ -1,6 +1,6 @@
 ---
-name: vol
-description: "Set volume. /music:vol 60, /music:vol up, /music:vol down, /music:vol kitchen 80"
+name: volume
+description: "Set volume. /music:volume 60, /music:volume up, /music:volume down, /music:volume kitchen 80"
 arguments:
   - name: level
     description: "0-100, 'up' (+10), 'down' (-10), or '<speaker> <0-100>'"
@@ -12,7 +12,7 @@ disable-model-invocation: true
 V="$ARGUMENTS"
 
 if command -v "$MUSIC_CLI" &>/dev/null; then
-    $MUSIC_CLI vol $V
+    $MUSIC_CLI volume $V
 else
     LOWER=$(echo "$V" | tr "[:upper:]" "[:lower:]")
     LAST_WORD="${V##* }"

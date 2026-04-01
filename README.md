@@ -15,8 +15,54 @@ All commands start with **`/music:`** — type `/music:` and tab to discover the
 
 ## Install
 
+### Claude Code (CLI)
+
+```bash
+# Add the marketplace
+/plugin marketplace add anthonymaley/music
+
+# Install the plugin
+/plugin install music@anthonymaley-music
 ```
-/install anthonymaley/music
+
+### Claude Desktop App (Cowork)
+
+1. Click **+** next to the prompt box
+2. Select **Plugins**
+3. Choose **Add plugin**
+4. Browse and select **Apple Music**
+
+### Update
+
+```bash
+# CLI
+claude plugin update music@anthonymaley-music
+
+# Desktop — Manage plugins → Update
+```
+
+### Music CLI (optional — unlocks catalog features)
+
+Playback, speakers, and volume work out of the box. For catalog search, library management, playlists, and music discovery, build the `music` CLI:
+
+```bash
+cd ~/.claude/plugins/cache/music@anthonymaley-music
+scripts/install.sh
+```
+
+Then set up Apple Music API auth:
+
+```bash
+music auth setup     # guided: key ID, team ID, .p8 key
+music auth           # opens browser for user token
+music auth status    # verify everything's connected
+```
+
+After updating the plugin, rebuild the CLI:
+
+```bash
+cd ~/.claude/plugins/cache/music@anthonymaley-music
+scripts/install.sh
 ```
 
 ## Commands
@@ -37,17 +83,17 @@ Every command runs instantly — no AI reasoning, no chat clutter.
 | `/music:back` | Previous track |
 | `/music:stop` | Stop playback |
 | `/music:stop kitchen` | Remove kitchen from the speaker group |
-| `/music:np` | Show what's currently playing |
+| `/music:now` | Show what's currently playing |
 | `/music:shuffle` | Toggle shuffle on/off |
 
 ### Volume
 
 | Command | What it does |
 |---------|-------------|
-| `/music:vol 60` | Set all active speakers to 60 |
-| `/music:vol up` | Volume +10 |
-| `/music:vol down` | Volume -10 |
-| `/music:vol kitchen 80` | Set a specific speaker to 80 |
+| `/music:volume 60` | Set all active speakers to 60 |
+| `/music:volume up` | Volume +10 |
+| `/music:volume down` | Volume -10 |
+| `/music:volume kitchen 80` | Set a specific speaker to 80 |
 
 ### Speakers
 
@@ -119,23 +165,7 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-## Music CLI (optional, unlocks catalog features)
-
-The plugin works out of the box for playback, speakers, and volume using AppleScript. For catalog search, library management, playlists via API, and music discovery, install the `music` CLI:
-
-```bash
-scripts/install.sh
-```
-
-Then set up Apple Music API auth:
-
-```bash
-music auth setup     # guided setup: key ID, team ID, .p8 key
-music auth           # opens browser to get user token
-music auth status    # check what's configured
-```
-
-### What needs auth?
+## What Needs Auth?
 
 | Feature | No auth | Developer token | + User token |
 |---------|---------|----------------|-------------|
@@ -152,7 +182,7 @@ music auth status    # check what's configured
   /music:play kid a kitchen 60%
    │
    ├─ music speaker set Kitchen
-   ├─ music vol Kitchen 60
+   ├─ music volume Kitchen 60
    ├─ music play --song "kid a"
    │
   ▶ Playing Kid A — Everything In Its Right Place

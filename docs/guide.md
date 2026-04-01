@@ -40,17 +40,17 @@ Every slash command has `disable-model-invocation: true` — they execute immedi
 /music:back                      Previous track
 /music:stop                      Stop all playback
 /music:stop kitchen              Remove kitchen from the speaker group
-/music:np                        What's currently playing
+/music:now                        What's currently playing
 /music:shuffle                   Toggle shuffle on/off
 ```
 
 **Volume**
 
 ```
-/music:vol 60                    Set all active speakers to 60
-/music:vol up                    Volume +10
-/music:vol down                  Volume -10
-/music:vol kitchen 80            Set a specific speaker to 80
+/music:volume 60                    Set all active speakers to 60
+/music:volume up                    Volume +10
+/music:volume down                  Volume -10
+/music:volume kitchen 80            Set a specific speaker to 80
 ```
 
 **Speakers**
@@ -186,7 +186,7 @@ User types:  /music:play Fouk kitchen 60%
 2. Script checks: is music installed?
    ├─ YES → parses args, extracts speaker + volume + query
    │        music speaker set Kitchen
-   │        music vol Kitchen 60
+   │        music volume Kitchen 60
    │        music play --playlist "Fouk" || music play --song "Fouk"
    └─ NO  → osascript -e 'tell application "Music" to play'
 3. Output printed directly to chat
@@ -234,9 +234,9 @@ apple-music/
 │   ├── skip.md                  # /music:skip
 │   ├── back.md                  # /music:back
 │   ├── stop.md                  # /music:stop [speaker]
-│   ├── np.md                    # /music:np
+│   ├── now.md                    # /music:now
 │   ├── shuffle.md               # /music:shuffle
-│   ├── vol.md                   # /music:vol <level> | <speaker> <level>
+│   ├── volume.md                   # /music:volume <level> | <speaker> <level>
 │   ├── speaker.md               # /music:speaker <action> [name]
 │   ├── search.md                # /music:search <query>
 │   ├── add.md                   # /music:add <title> <artist>

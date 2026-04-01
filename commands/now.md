@@ -1,5 +1,5 @@
 ---
-name: np
+name: now
 description: Show what's currently playing in Apple Music
 disable-model-invocation: true
 ---

@@ -43,11 +43,11 @@ music speaker stop "Bedroom"                  # same — remove from group
 ## Volume (no auth)
 
 ```bash
-music vol                                     # show current volume per speaker
-music vol 60                                  # set all active speakers to 60
-music vol up                                  # +10 on all active speakers
-music vol down                                # -10 on all active speakers
-music vol Kitchen 80                          # set Kitchen to 80
+music volume                                     # show current volume per speaker
+music volume 60                                  # set all active speakers to 60
+music volume up                                  # +10 on all active speakers
+music volume down                                # -10 on all active speakers
+music volume Kitchen 80                          # set Kitchen to 80
 ```
 
 ## Catalog Search (developer token only)
@@ -109,7 +109,7 @@ music auth set-token <TOKEN>                  # save user token from browser
 
 | Tier | What works | What doesn't |
 |------|-----------|--------------|
-| No auth | play, pause, skip, back, stop, now, shuffle, repeat, speaker, vol | search, add, playlist (API), similar, suggest, new-releases, mix |
+| No auth | play, pause, skip, back, stop, now, shuffle, repeat, speaker, volume | search, add, playlist (API), similar, suggest, new-releases, mix |
 | Developer token only | Above + search | add, playlist (API), similar, suggest, new-releases, mix |
 | Both tokens | Everything | — |
 
@@ -119,7 +119,7 @@ For multi-step requests like "play Fouk on the kitchen speaker at 60%", compose 
 
 ```bash
 music speaker set "Kitchen"
-music vol Kitchen 60
+music volume Kitchen 60
 music play --playlist "Working Vibes"
 ```
 
