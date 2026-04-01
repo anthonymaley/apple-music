@@ -31,40 +31,38 @@ Every slash command has `disable-model-invocation: true` — they execute immedi
 
 ```
 /music:play                      Resume playback
-/music:play Working Vibes        Play a playlist (shuffled)
-/music:play Radiohead            Search and play an artist
-/music:play kid a                Search and play an album or song
-/music:play Fouk kitchen 60%     Play on a speaker at a volume
+/music:play Working Vibes        Play a playlist
+/music:play Working Vibes shuffle  Play with shuffle
+/music:play 3                    Play result #3 from last search
 /music:pause                     Pause
 /music:skip                      Next track
 /music:back                      Previous track
 /music:stop                      Stop all playback
 /music:stop kitchen              Remove kitchen from the speaker group
-/music:now                        What's currently playing
+/music:now                       What's currently playing
 /music:shuffle                   Toggle shuffle on/off
-```
-
-**Volume**
-
-```
-/music:volume 60                    Set all active speakers to 60
-/music:volume up                    Volume +10
-/music:volume down                  Volume -10
-/music:volume kitchen 80            Set a specific speaker to 80
 ```
 
 **Speakers**
 
 ```
-/music:speaker                   List all AirPlay devices
+/music:speaker                   Interactive picker (TUI)
 /music:speaker list              List all AirPlay devices
-/music:speaker kitchen           Switch to kitchen only
-/music:speaker only kitchen      Same — switch to kitchen only
-/music:speaker airpods           Switch to AirPods
-/music:speaker add bedroom       Add bedroom to the current group
-/music:speaker remove kitchen    Remove kitchen from the group
-/music:speaker stop kitchen      Same — remove kitchen from the group
-/music:speaker remove kitchen add bedroom    Chain actions in one command
+/music:speaker kitchen           Add kitchen to active speakers
+/music:speaker kitchen 40        Add kitchen and set volume to 40
+/music:speaker kitchen stop      Remove kitchen from the group
+/music:speaker airpods only      Switch to AirPods only
+/music:speaker 1 2 5             Add speakers by index from last list
+```
+
+**Volume**
+
+```
+/music:volume                       Interactive mixer (TUI)
+/music:volume 60                    Set all active speakers to 60
+/music:volume up                    Volume +10
+/music:volume down                  Volume -10
+/music:volume kitchen 80            Set a specific speaker to 80
 ```
 
 **Catalog & Library** (requires music CLI + auth)
@@ -73,17 +71,22 @@ Every slash command has `disable-model-invocation: true` — they execute immedi
 /music:search Bohemian Rhapsody  Search Apple Music catalog
 /music:search Fouk               Search by artist
 /music:add Get It Done Fouk      Add a track to your library
-/music:similar                   Tracks similar to what's playing
+/music:add 3                     Add result #3 from last search
+/music:similar                   Interactive browser for similar tracks (TUI)
+music add --to "House"           Add current song to a playlist
+music remove                     Remove current song from current playlist
 ```
 
 **Playlists** (requires music CLI + auth)
 
 ```
+/music:playlist                  Interactive browser (TUI)
 /music:playlist list             List all your playlists
 /music:playlist tracks Working Vibes    Show tracks in a playlist
 /music:playlist create Friday Mix       Create an empty playlist
+/music:playlist create Friday Mix 1 3 5  Create from search results
+/music:playlist add "House" 1 3 5        Add search results to playlist
 /music:playlist delete Old Playlist     Delete a playlist
-/music:playlist add "Playlist" "Song" "Artist"    Add a track
 ```
 
 ### 2. Natural Language (Skill)
@@ -265,12 +268,19 @@ apple-music/
 │       │   ├── AuthCommands.swift
 │       │   ├── SearchCommand.swift
 │       │   ├── AddCommand.swift
+│       │   ├── RemoveCommand.swift
 │       │   ├── PlaylistCommands.swift
 │       │   ├── DiscoveryCommands.swift
 │       │   └── MixCommand.swift
-│       └── Models/
-│           ├── OutputFormat.swift
-│           └── LibrarySync.swift
+│       ├── Models/
+│       │   ├── OutputFormat.swift
+│       │   ├── ResultCache.swift
+│       │   └── LibrarySync.swift
+│       └── TUI/
+│           ├── Terminal.swift
+│           ├── MultiSelectList.swift
+│           ├── ListPicker.swift
+│           └── VolumeMixer.swift
 ├── docs/
 │   ├── guide.md                 # This document
 │   └── playbook.md              # How to rebuild from scratch
@@ -329,7 +339,7 @@ music auth status
 
 ## Version
 
-v1.1.0 — all three locations stay in sync:
+v1.2.0 — all three locations stay in sync:
 - `.claude-plugin/plugin.json` → `version`
 - `.claude-plugin/marketplace.json` → `metadata.version`
 - `.claude-plugin/marketplace.json` → `plugins[0].version`
