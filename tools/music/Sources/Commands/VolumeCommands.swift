@@ -2,7 +2,7 @@ import ArgumentParser
 import Foundation
 
 struct Vol: ParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Get or set volume.")
+    static let configuration = CommandConfiguration(commandName: "volume", abstract: "Get or set volume.")
     @Argument(help: "Volume level (0-100), 'up', 'down', or speaker name") var args: [String] = []
     @Flag(name: .long, help: "Output JSON") var json = false
 

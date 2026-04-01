@@ -17,8 +17,6 @@
 
 - Publish v1.0.0 to Claude Code marketplace
 - End-to-end testing of all slash commands (especially /music:search, /music:add, /music:similar, /music:playlist)
-- Consider `np` → `now` and `vol` → `volume` command renames (per naming doc recommendation)
-- Consider adding CLI aliases for short forms (`np`, `vol`) alongside primary names (`now`, `volume`)
 
 ## Key Context
 
@@ -34,5 +32,4 @@
 
 ## Backlog
 
-- Consider `/music:now` as primary (rename from `/music:np`), keep `np` as alias
-- Consider `/music:volume` as primary (rename from `/music:vol`), keep `vol` as alias
+- (none)
