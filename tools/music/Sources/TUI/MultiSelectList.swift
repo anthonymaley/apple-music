@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct MultiSelectItem {
     let label: String
@@ -27,63 +28,104 @@ func runMultiSelectList(
     defer { terminal.exitRawMode() }
 
     var cursor = 0
-    let pageSize = 20
+
+    // Terminal size
+    func termSize() -> (rows: Int, cols: Int) {
+        var ws = winsize()
+        _ = ioctl(STDOUT_FILENO, UInt(TIOCGWINSZ), &ws)
+        return (Int(ws.ws_row), Int(ws.ws_col))
+    }
+
+    let contentX = 3
+    let titleY = 3
+    let ruleY = 4
+    let bodyY = 6
+    let namePad = 28
+    let barWidth = 15
 
     func selectedIndices() -> [Int] {
         items.enumerated().compactMap { $0.element.selected ? $0.offset : nil }
     }
 
+    func parseVolume(_ sublabel: String) -> Int {
+        // sublabel formatted as "vol: 35"
+        if let range = sublabel.range(of: "vol: "),
+           let vol = Int(sublabel[range.upperBound...].trimmingCharacters(in: .whitespaces)) {
+            return vol
+        }
+        return 0
+    }
+
+    func buildBar(volume: Int) -> String {
+        let filled = Int(Double(volume) / 100.0 * Double(barWidth))
+        let empty = barWidth - filled
+        return "\(ANSICode.green)\(String(repeating: "█", count: filled))\(ANSICode.reset)\(ANSICode.dim)\(String(repeating: "░", count: empty))\(ANSICode.reset)"
+    }
+
     func render() {
+        let (termHeight, _) = termSize()
+        let footerY = termHeight
+
         var out = ANSICode.cursorHome + ANSICode.clearScreen
 
-        // Header
-        out += "\n"
-        out += "  \(ANSICode.bold)\(ANSICode.cyan)♫  \(title)\(ANSICode.reset)\n"
-        out += "  \(ANSICode.dim)\(String(repeating: "─", count: min(60, title.count + 6)))\(ANSICode.reset)\n\n"
+        // App label
+        out += ANSICode.moveTo(row: 2, col: contentX)
+        out += "\(ANSICode.dim)music\(ANSICode.reset)"
 
-        let start = max(0, cursor - pageSize / 2)
-        let end = min(items.count, start + pageSize)
+        // Title
+        out += ANSICode.moveTo(row: titleY, col: contentX)
+        out += "\(ANSICode.bold)\(ANSICode.cyan)♫ \(title)\(ANSICode.reset)"
 
-        for i in start..<end {
+        // Accent rule
+        out += ANSICode.moveTo(row: ruleY, col: contentX)
+        out += "\(ANSICode.dim)\(String(repeating: "─", count: min(40, title.count + 4)))\(ANSICode.reset)"
+
+        // Visible items
+        let maxVisible = max(1, termHeight - bodyY - 3) // leave room for status + footer
+        let start = max(0, min(cursor - maxVisible / 2, items.count - maxVisible))
+        let end = min(items.count, start + maxVisible)
+
+        let hasSpeakerMode = onAdjust != nil
+
+        for (offset, i) in (start..<end).enumerated() {
             let item = items[i]
+            let row = bodyY + offset
+            out += ANSICode.moveTo(row: row, col: contentX)
+
+            let pointer = i == cursor ? "\(ANSICode.cyan)▶\(ANSICode.reset)" : " "
             let marker = item.selected ? "\(ANSICode.green)●\(ANSICode.reset)" : "\(ANSICode.dim)○\(ANSICode.reset)"
-            let isCursor = i == cursor
-            let highlight = isCursor ? ANSICode.inverse : ""
-            let resetH = isCursor ? ANSICode.reset : ""
-            let pointer = isCursor ? "\(ANSICode.cyan)▸\(ANSICode.reset)" : " "
-            let num = String(format: "%2d", i + 1)
-            let sub = item.sublabel.isEmpty ? "" : "\n       \(ANSICode.dim)\(item.sublabel)\(ANSICode.reset)"
-            out += " \(pointer) \(marker) \(highlight) \(num). \(item.label) \(resetH)\(sub)\n"
-        }
 
-        // Scroll indicator
-        if items.count > pageSize {
-            let pct = items.count > 1 ? Int(Double(cursor) / Double(items.count - 1) * 100) : 0
-            out += "\n  \(ANSICode.dim)[\(start + 1)–\(end) of \(items.count)] \(pct)%\(ANSICode.reset)\n"
-        }
-
-        // Footer
-        let selected = selectedIndices()
-        let hasAdjust = onAdjust != nil
-        let footerWidth = hasAdjust ? 55 : 45
-        out += "\n  \(ANSICode.dim)╭\(String(repeating: "─", count: footerWidth))╮\(ANSICode.reset)\n"
-        let navHints = hasAdjust
-            ? "↑↓ navigate  ␣ select  ←→ volume  ⏎ confirm  q quit"
-            : "↑↓ navigate  ␣ select  ⏎ confirm  q quit"
-        let pad = String(repeating: " ", count: max(0, footerWidth - navHints.count))
-        out += "  \(ANSICode.dim)│\(ANSICode.reset) \(navHints)\(pad) \(ANSICode.dim)│\(ANSICode.reset)\n"
-        if !actions.isEmpty {
-            var actionLine = "  \(ANSICode.dim)│\(ANSICode.reset) "
-            for a in actions {
-                actionLine += "\(ANSICode.cyan)\(a.key)\(ANSICode.reset) \(a.label)  "
+            if hasSpeakerMode {
+                let vol = parseVolume(item.sublabel)
+                let padded = item.label.padding(toLength: namePad, withPad: " ", startingAt: 0)
+                let bar = buildBar(volume: vol)
+                let pct = String(format: "%3d%%", vol)
+                out += "\(pointer) \(marker) \(padded) \(bar)  \(pct)"
+            } else {
+                let num = String(format: "%02d", i + 1)
+                out += "\(pointer) \(marker) \(num). \(item.label)"
             }
-            actionLine += String(repeating: " ", count: max(0, footerWidth - actions.reduce(0) { $0 + 4 + $1.label.count }))
-            actionLine += "\(ANSICode.dim)│\(ANSICode.reset)"
-            out += actionLine + "\n"
         }
-        out += "  \(ANSICode.dim)╰\(String(repeating: "─", count: footerWidth))╯\(ANSICode.reset)\n"
-        if !selected.isEmpty {
-            out += "  \(ANSICode.green)\(selected.count) selected\(ANSICode.reset)\n"
+
+        // Status row above footer
+        let sel = selectedIndices()
+        let statusY = footerY - 2
+        if !sel.isEmpty {
+            out += ANSICode.moveTo(row: statusY, col: contentX)
+            out += "\(ANSICode.green)\(sel.count) selected\(ANSICode.reset)"
+        }
+
+        // Footer — docked at bottom, no box
+        out += ANSICode.moveTo(row: footerY, col: contentX)
+        if hasSpeakerMode {
+            out += "\(ANSICode.dim)↑↓ Navigate   Space Toggle   ←→ Volume   Enter Confirm   q Quit\(ANSICode.reset)"
+        } else {
+            var line = "↑↓ Navigate   Space Select   Enter Confirm"
+            for a in actions {
+                line += "   \(a.key) \(a.label)"
+            }
+            line += "   q Quit"
+            out += "\(ANSICode.dim)\(line)\(ANSICode.reset)"
         }
 
         print(out, terminator: "")
