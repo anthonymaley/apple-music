@@ -30,25 +30,13 @@ func runMultiSelectList(
     var cursor = 0
     var scrollOffset = 0
 
-    // Shared shell coordinates
-    let appX = 3
-    let appY = 2
-    let titleY = 4
-    let ruleY = 5
-    let bodyY = 7
-
-    let nameW = 28
-    let barW = 18
-
     let hasSpeakerMode = onAdjust != nil
 
-    func termSize() -> (height: Int, width: Int) {
-        var ws = winsize()
-        _ = ioctl(STDOUT_FILENO, UInt(TIOCGWINSZ), &ws)
-        let w = Int(ws.ws_col) > 0 ? Int(ws.ws_col) : 120
-        let h = Int(ws.ws_row) > 0 ? Int(ws.ws_row) : 30
-        return (h, w)
-    }
+    // Column widths for speaker mode
+    let nameW = 28
+    let gapW = 2
+    let barW = 20
+    let gap2W = 1
 
     func selectedIndices() -> [Int] {
         items.enumerated().compactMap { $0.element.selected ? $0.offset : nil }
@@ -62,19 +50,11 @@ func runMultiSelectList(
         return 0
     }
 
-    func buildBar(volume: Int) -> String {
-        let filled = Int(Double(volume) / 100.0 * Double(barW))
-        let empty = barW - filled
-        return "\(ANSICode.green)\(String(repeating: "█", count: filled))\(ANSICode.reset)\(ANSICode.dim)\(String(repeating: "░", count: empty))\(ANSICode.reset)"
-    }
-
     func render() {
-        let (termHeight, _) = termSize()
-        let footerY = termHeight - 1
-        let statusY = footerY - 1
-        let maxVisible = max(1, termHeight - bodyY - 4)
+        let frame = ScreenFrame.current()
+        let maxVisible = max(1, frame.statusY - frame.bodyY - 4)
 
-        // Adjust scroll offset to keep cursor visible
+        // Adjust scroll offset
         if cursor < scrollOffset {
             scrollOffset = cursor
         } else if cursor >= scrollOffset + maxVisible {
@@ -83,59 +63,77 @@ func runMultiSelectList(
 
         let visibleEnd = min(items.count, scrollOffset + maxVisible)
 
-        var out = ANSICode.cursorHome + ANSICode.clearScreen
+        // Status text
+        let sel = selectedIndices()
+        let statusText = sel.isEmpty ? "0 selected" : "\(sel.count) selected"
 
-        // App label
-        out += ANSICode.moveTo(row: appY, col: appX)
-        out += "\(ANSICode.dim)music\(ANSICode.reset)"
+        // Footer text
+        let footerText: String
+        if hasSpeakerMode {
+            footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  ↑↓ Navigate   Space Toggle   ←→ Volume   Enter Confirm   q Quit"
+        } else {
+            var line = "\(ANSICode.dim)Controls\(ANSICode.reset)  ↑↓ Navigate   Space Select   Enter Confirm"
+            for a in actions {
+                line += "   \(a.key) \(a.label)"
+            }
+            line += "   q Quit"
+            footerText = line
+        }
 
-        // Title
-        out += ANSICode.moveTo(row: titleY, col: appX)
-        out += "\(ANSICode.bold)\(ANSICode.cyan)♫ \(title)\(ANSICode.reset)"
+        var out = renderShell(title: title, status: statusText, footer: footerText)
 
-        // Accent rule
-        out += ANSICode.moveTo(row: ruleY, col: appX)
-        out += "\(ANSICode.dim)\(String(repeating: "─", count: min(40, title.count + 4)))\(ANSICode.reset)"
+        let tableX = 3
+        let tableY = frame.bodyY + 2
 
         // Item rows
         for i in scrollOffset..<visibleEnd {
             let item = items[i]
-            let row = bodyY + (i - scrollOffset)
-            out += ANSICode.moveTo(row: row, col: appX)
+            let row = tableY + (i - scrollOffset)
+            out += ANSICode.moveTo(row: row, col: tableX)
 
             let pointer = i == cursor ? "\(ANSICode.cyan)▶\(ANSICode.reset)" : " "
             let marker = item.selected ? "\(ANSICode.green)●\(ANSICode.reset)" : "\(ANSICode.dim)○\(ANSICode.reset)"
 
             if hasSpeakerMode {
                 let vol = parseVolume(item.sublabel)
-                let padded = item.label.padding(toLength: nameW, withPad: " ", startingAt: 0)
-                let bar = buildBar(volume: vol)
+                let nameStr = truncText(item.label, to: nameW)
+                let padded = nameStr.padding(toLength: nameW, withPad: " ", startingAt: 0)
                 let pct = String(format: "%3d%%", vol)
-                out += "\(pointer) \(marker) \(padded)  \(bar) \(pct)"
+
+                if item.selected {
+                    // Active: show bar + percent
+                    let bar = meterBar(value: vol, width: barW)
+                    out += "\(pointer) \(marker) \(padded)  \(bar) \(pct)"
+                } else {
+                    // Inactive: percent only, no bar
+                    let spacer = String(repeating: " ", count: gapW + barW + gap2W)
+                    out += "\(pointer) \(marker) \(padded)\(spacer) \(pct)"
+                }
             } else {
                 let num = String(format: "%02d", i + 1)
-                out += "\(pointer) \(marker) \(num). \(item.label)"
+                out += "\(pointer) \(marker) \(num). \(truncText(item.label, to: frame.width - 16))"
             }
         }
 
-        // Status row
-        let sel = selectedIndices()
-        if !sel.isEmpty {
-            out += ANSICode.moveTo(row: statusY, col: appX)
-            out += "\(ANSICode.green)\(sel.count) selected\(ANSICode.reset)"
-        }
-
-        // Footer
-        out += ANSICode.moveTo(row: footerY, col: appX)
+        // Right summary pane for speaker mode
         if hasSpeakerMode {
-            out += "\(ANSICode.dim)↑↓ Navigate   Space Toggle   ←→ Volume   Enter Confirm   q Quit\(ANSICode.reset)"
-        } else {
-            var line = "↑↓ Navigate   Space Select   Enter Confirm"
-            for a in actions {
-                line += "   \(a.key) \(a.label)"
+            let paneX = 74
+            if paneX < frame.width - 10 {
+                let paneY = frame.bodyY
+                out += ANSICode.moveTo(row: paneY, col: paneX)
+                out += "\(ANSICode.bold)Selected\(ANSICode.reset)"
+                out += ANSICode.moveTo(row: paneY + 1, col: paneX)
+                out += "\(ANSICode.dim)\(String(repeating: "─", count: 8))\(ANSICode.reset)"
+
+                var row = paneY + 3
+                let maxPaneW = frame.width - paneX - 2
+                for i in sel {
+                    if row >= frame.statusY - 1 { break }
+                    out += ANSICode.moveTo(row: row, col: paneX)
+                    out += truncText(items[i].label, to: maxPaneW)
+                    row += 1
+                }
             }
-            line += "   q Quit"
-            out += "\(ANSICode.dim)\(line)\(ANSICode.reset)"
         }
 
         print(out, terminator: "")

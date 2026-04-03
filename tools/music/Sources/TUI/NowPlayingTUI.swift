@@ -287,149 +287,106 @@ func runNowPlayingTUI() {
     terminal.enterRawMode()
     defer { terminal.exitRawMode() }
 
-    // --- Layout computation ---
-    var ws = winsize()
-    _ = ioctl(STDOUT_FILENO, UInt(TIOCGWINSZ), &ws)
-    let termWidth = Int(ws.ws_col) > 0 ? Int(ws.ws_col) : 120
-    let termHeight = Int(ws.ws_row) > 0 ? Int(ws.ws_row) : 30
-
-    let contentX = 3
-    let contentY = 2
-    let contentWidth = termWidth - 4
-
-    let gap1 = 2
-    let gap2 = 4
-    let artW = max(24, min(30, contentWidth * 24 / 100))
-    let metaW = max(28, min(36, contentWidth * 28 / 100))
-    let queueW = contentWidth - artW - metaW - gap1 - gap2
-
-    let artX = contentX
-    let metaX = artX + artW + gap1
-    let queueX = metaX + metaW + gap2
-
-    let sectionY = contentY + 1
-    let contentTopY = sectionY + 3
-
-    let artSize = min(artW, 26, termHeight - contentTopY - 6)
-    let barW = max(10, metaW - 10)
-
-    let footerY = termHeight - 1
+    // --- Layout ---
+    let artX = 3
+    let artY = 11
+    let artW = 28
+    let metaX = 34
+    let metaY = 11
+    let metaW = 34
+    let queueX = 74
+    let queueY = 11
+    let progBarW = 18
 
     var trackList: [TrackListEntry] = []
     var artLines: [String] = []
     var lastTrackName = ""
 
-    func truncate(_ s: String, to width: Int) -> String {
-        if s.count <= width { return s }
-        return String(s.prefix(width - 1)) + "…"
-    }
-
     func render(_ np: NowPlayingState) {
-        var out = ANSICode.cursorHome + ANSICode.clearScreen
+        let frame = ScreenFrame.current()
+        let queueW = frame.width - queueX - 3
+        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑ ↓\(ANSICode.reset) Skip   \(ANSICode.bold)← →\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
-        // --- Top bar ---
-        out += ANSICode.moveTo(row: contentY, col: contentX)
-        out += "\(ANSICode.dim)\(ANSICode.bold)music\(ANSICode.reset)"
+        var out = renderShell(title: "Now Playing", status: "", footer: footerText)
 
-        // --- Section headers ---
-        out += ANSICode.moveTo(row: sectionY, col: artX)
-        out += "\(ANSICode.cyan)Now Playing\(ANSICode.reset)"
-
+        // Queue header
         if queueW >= 24 {
-            out += ANSICode.moveTo(row: sectionY, col: queueX)
-            out += "\(ANSICode.cyan)Queue\(ANSICode.reset)"
-        }
-
-        // --- Section rules ---
-        let npRuleW = min(artW + metaW + gap1 - 2, 28)
-        out += ANSICode.moveTo(row: sectionY + 1, col: artX)
-        out += "\(ANSICode.dim)\(String(repeating: "─", count: npRuleW))\(ANSICode.reset)"
-
-        if queueW >= 24 {
-            let qRuleW = min(queueW - 2, 18)
-            out += ANSICode.moveTo(row: sectionY + 1, col: queueX)
-            out += "\(ANSICode.dim)\(String(repeating: "─", count: qRuleW))\(ANSICode.reset)"
+            out += ANSICode.moveTo(row: 5, col: queueX)
+            out += "\(ANSICode.bold)\(ANSICode.cyan)Queue\(ANSICode.reset)"
+            out += ANSICode.moveTo(row: 6, col: queueX)
+            out += "\(ANSICode.dim)\(String(repeating: "─", count: 18))\(ANSICode.reset)"
         }
 
         // --- Cover art ---
-        let hasArt = !artLines.isEmpty
+        let artSize = min(artW, 28, frame.statusY - artY - 2)
         for i in 0..<artSize {
-            if hasArt && i < artLines.count {
-                out += ANSICode.moveTo(row: contentTopY + i, col: artX)
+            if i < artLines.count {
+                out += ANSICode.moveTo(row: artY + i, col: artX)
                 out += "\(artLines[i])\(ANSICode.reset)"
             }
         }
 
         // --- Metadata ---
-        let titleY = contentTopY
-        let artistY = contentTopY + 1
-        let albumY = contentTopY + 2
-        let progressY = contentTopY + 4
-        let outputY = contentTopY + 6
-        let volumeY = contentTopY + 7
+        // Title
+        out += ANSICode.moveTo(row: metaY, col: metaX)
+        out += "\(ANSICode.bold)\(truncText(np.track, to: metaW))\(ANSICode.reset)"
 
-        // Title (boldest)
-        out += ANSICode.moveTo(row: titleY, col: metaX)
-        out += "\(ANSICode.bold)\(truncate(np.track, to: metaW))\(ANSICode.reset)"
+        // Artist
+        out += ANSICode.moveTo(row: metaY + 2, col: metaX)
+        out += "\(ANSICode.bold)\(truncText(np.artist, to: metaW))\(ANSICode.reset)"
 
-        // Artist (strong secondary)
-        out += ANSICode.moveTo(row: artistY, col: metaX)
-        out += "\(ANSICode.bold)\(truncate(np.artist, to: metaW))\(ANSICode.reset)"
+        // Album
+        out += ANSICode.moveTo(row: metaY + 4, col: metaX)
+        out += "\(ANSICode.dim)\(truncText(np.album, to: metaW))\(ANSICode.reset)"
 
-        // Album (dim)
-        out += ANSICode.moveTo(row: albumY, col: metaX)
-        out += "\(ANSICode.dim)\(truncate(np.album, to: metaW))\(ANSICode.reset)"
-
-        // Progress bar: "0:00 ─────────●──────── 5:56"
+        // Progress bar: "0:00 ───────●────────── 5:56"
         let elapsed = formatTime(np.position)
         let total = formatTime(np.duration)
-        let timeW = elapsed.count + total.count + 2 // spaces
-        let actualBarW = max(8, barW - timeW)
         let ratio = np.duration > 0 ? Double(np.position) / Double(np.duration) : 0
-        let knobIdx = Int(ratio * Double(actualBarW - 1))
+        let knobIdx = max(0, min(progBarW - 1, Int(ratio * Double(progBarW - 1))))
 
         var barStr = ""
-        for i in 0..<actualBarW {
+        for i in 0..<progBarW {
             if i == knobIdx {
                 barStr += "\(ANSICode.bold)●\(ANSICode.reset)"
-            } else if i < knobIdx {
-                barStr += "\(ANSICode.dim)─\(ANSICode.reset)"
             } else {
                 barStr += "\(ANSICode.dim)─\(ANSICode.reset)"
             }
         }
 
-        out += ANSICode.moveTo(row: progressY, col: metaX)
+        out += ANSICode.moveTo(row: metaY + 8, col: metaX)
         out += "\(elapsed) \(barStr) \(total)"
 
-        // Output (speakers)
+        // Outputs block
         let labelW = 8
         if !np.speakers.isEmpty {
-            let mainSpeaker = np.speakers.first!
-            out += ANSICode.moveTo(row: outputY, col: metaX)
+            let primarySpk = np.speakers.first!
+            out += ANSICode.moveTo(row: metaY + 12, col: metaX)
             out += "\(ANSICode.dim)Output\(ANSICode.reset)"
-            out += ANSICode.moveTo(row: outputY, col: metaX + labelW)
-            out += truncate(mainSpeaker.name, to: metaW - labelW)
+            out += ANSICode.moveTo(row: metaY + 12, col: metaX + labelW)
+            out += truncText(primarySpk.name, to: metaW - labelW)
 
-            out += ANSICode.moveTo(row: volumeY, col: metaX)
-            out += "\(ANSICode.dim)Volume\(ANSICode.reset)"
-            out += ANSICode.moveTo(row: volumeY, col: metaX + labelW)
-            out += "\(mainSpeaker.volume)"
-
-            // Additional speakers on next rows
-            for (i, spk) in np.speakers.dropFirst().enumerated() {
-                out += ANSICode.moveTo(row: volumeY + 1 + i, col: metaX + labelW)
-                out += "\(ANSICode.dim)\(truncate(spk.name, to: metaW - labelW - 4)) \(spk.volume)\(ANSICode.reset)"
+            if np.speakers.count > 1 {
+                let mixStr = np.speakers.map { "\($0.name) \($0.volume)" }.joined(separator: ", ")
+                out += ANSICode.moveTo(row: metaY + 14, col: metaX)
+                out += "\(ANSICode.dim)Mix\(ANSICode.reset)"
+                out += ANSICode.moveTo(row: metaY + 14, col: metaX + labelW)
+                out += "\(ANSICode.dim)\(truncText(mixStr, to: metaW - labelW))\(ANSICode.reset)"
             }
+
+            out += ANSICode.moveTo(row: metaY + 16, col: metaX)
+            out += "\(ANSICode.dim)Volume\(ANSICode.reset)"
+            out += ANSICode.moveTo(row: metaY + 16, col: metaX + labelW)
+            out += "\(primarySpk.volume)"
         }
 
         // --- Queue ---
         if queueW >= 24 {
-            let queueVisibleCount = min(8, termHeight - contentTopY - 4)
-            for (i, entry) in trackList.prefix(queueVisibleCount).enumerated() {
-                out += ANSICode.moveTo(row: contentTopY + i, col: queueX)
+            let queueVisible = min(8, frame.statusY - queueY - 2)
+            for (i, entry) in trackList.prefix(queueVisible).enumerated() {
+                out += ANSICode.moveTo(row: queueY + i, col: queueX)
                 let idx = String(format: "%02d", entry.index)
-                let rowText = truncate("\(entry.name) — \(entry.artist)", to: queueW - 6)
+                let rowText = truncText("\(entry.name) — \(entry.artist)", to: queueW - 6)
                 if entry.isCurrent {
                     out += "\(ANSICode.green)▶\(ANSICode.reset) \(ANSICode.bold)\(idx)  \(rowText)\(ANSICode.reset)"
                 } else {
@@ -438,37 +395,24 @@ func runNowPlayingTUI() {
             }
         }
 
-        // --- Footer (docked, no border) ---
-        out += ANSICode.moveTo(row: footerY, col: contentX)
-        out += "\(ANSICode.dim)Controls\(ANSICode.reset)  "
-        out += "\(ANSICode.bold)↑ ↓\(ANSICode.reset) Skip   "
-        out += "\(ANSICode.bold)← →\(ANSICode.reset) Seek   "
-        out += "\(ANSICode.bold)Space\(ANSICode.reset) Pause   "
-        out += "\(ANSICode.bold)r\(ANSICode.reset) Radio   "
-        out += "\(ANSICode.bold)q\(ANSICode.reset) Quit"
-
         print(out, terminator: "")
         fflush(stdout)
     }
 
     func renderStopped() {
-        var out = ANSICode.cursorHome + ANSICode.clearScreen
-        out += ANSICode.moveTo(row: contentY, col: contentX)
-        out += "\(ANSICode.dim)\(ANSICode.bold)music\(ANSICode.reset)"
-        out += ANSICode.moveTo(row: sectionY, col: artX)
-        out += "\(ANSICode.cyan)Now Playing\(ANSICode.reset)"
-        out += ANSICode.moveTo(row: sectionY + 1, col: artX)
-        out += "\(ANSICode.dim)\(String(repeating: "─", count: 11))\(ANSICode.reset)"
-        out += ANSICode.moveTo(row: contentTopY, col: artX)
+        let frame = ScreenFrame.current()
+        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        var out = renderShell(title: "Now Playing", status: "", footer: footerText)
+        out += ANSICode.moveTo(row: frame.bodyY + 2, col: 3)
         out += "\(ANSICode.dim)Nothing playing.\(ANSICode.reset)"
-        out += ANSICode.moveTo(row: footerY, col: contentX)
-        out += "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)q\(ANSICode.reset) Quit"
         print(out, terminator: "")
         fflush(stdout)
     }
 
     func refreshTrackContext() {
         trackList = pollSurroundingTracks()
+        let frame = ScreenFrame.current()
+        let artSize = min(artW, 28, frame.statusY - artY - 2)
         if let artPath = extractArtwork() {
             artLines = artworkToAscii(path: artPath, width: artW, height: artSize)
         } else {

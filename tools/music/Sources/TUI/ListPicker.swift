@@ -47,30 +47,28 @@ func runListPicker(
 
     var cursor = 0
     var scrollOffset = 0
+    var lastPreviewCursor = -1
+    var cachedPreview: PlaylistPreview? = nil
+    var cachedArtLines: [String] = []
 
-    // Terminal size
-    func termSize() -> (rows: Int, cols: Int) {
-        var ws = winsize()
-        _ = ioctl(STDOUT_FILENO, UInt(TIOCGWINSZ), &ws)
-        return (Int(ws.ws_row), Int(ws.ws_col))
+    let leftX = 3
+    let leftW = 42
+    let rightX = 52
+
+    func refreshPreview() {
+        guard cursor != lastPreviewCursor else { return }
+        lastPreviewCursor = cursor
+        cachedPreview = onPreview?(cursor)
+        cachedArtLines = []
+        if let onArtwork = onArtwork, let artPath = onArtwork(cursor) {
+            cachedArtLines = renderArtwork(path: artPath, width: 14, height: 14)
+        }
     }
 
-    // Shared coordinates
-    let appX = 3
-    let appY = 2
-    let titleX = 3
-    let titleY = 4
-    let ruleX = 3
-    let ruleY = 5
-    let bodyY = 7
-
     func render() {
-        let (termHeight, termWidth) = termSize()
-        let footerY = termHeight - 1
-        let statusY = footerY - 1
-        let maxVisible = max(1, termHeight - bodyY - 4)
-
-        let useTwoPane = onPreview != nil && termWidth >= 95
+        let frame = ScreenFrame.current()
+        let maxVisible = max(1, frame.statusY - frame.bodyY - 4)
+        let useTwoPane = onPreview != nil && frame.width >= 95
 
         // Scrolling
         if cursor < scrollOffset {
@@ -79,137 +77,96 @@ func runListPicker(
             scrollOffset = cursor - maxVisible + 1
         }
 
-        var out = ANSICode.cursorHome + ANSICode.clearScreen
+        // Status and footer
+        let statusText = "\(items.count) \(items.count == 1 ? "playlist" : "playlists")"
+        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  ↑↓ Navigate   Enter Open   p Play   q Quit"
 
-        // App label
-        out += ANSICode.moveTo(row: appY, col: appX)
-        out += "\(ANSICode.dim)music\(ANSICode.reset)"
-
-        // Title
-        out += ANSICode.moveTo(row: titleY, col: titleX)
-        out += "\(ANSICode.bold)\(ANSICode.cyan)♫ \(title)\(ANSICode.reset)"
-
-        // Accent rule
-        out += ANSICode.moveTo(row: ruleY, col: ruleX)
-        out += "\(ANSICode.dim)\(String(repeating: "─", count: min(40, title.count + 4)))\(ANSICode.reset)"
+        var out = renderShell(title: title, status: statusText, footer: footerText)
 
         if useTwoPane {
-            // --- Two-pane layout ---
-            let leftX = 3
-            let leftW = 38
-            let rightX = leftX + leftW + 4
-            let rightW = termWidth - rightX - 3
-
-            // Left pane: playlist list
+            // --- Left pane: playlist list ---
+            let listY = frame.bodyY + 2
             let end = min(items.count, scrollOffset + maxVisible)
+            let maxLen = leftW - 4
+
             for i in scrollOffset..<end {
-                let row = bodyY + (i - scrollOffset)
+                let row = listY + (i - scrollOffset)
                 out += ANSICode.moveTo(row: row, col: leftX)
 
-                let pointer: String
-                let label: String
-                let maxLen = leftW - 4
-                let truncated: String
-                if items[i].count > maxLen {
-                    truncated = String(items[i].prefix(maxLen - 1)) + "…"
-                } else {
-                    truncated = items[i]
-                }
+                let truncated = truncText(items[i], to: maxLen)
 
                 if i == cursor {
-                    pointer = "\(ANSICode.cyan)▶\(ANSICode.reset)"
-                    label = "\(ANSICode.bold)\(truncated)\(ANSICode.reset)"
+                    out += "\(ANSICode.cyan)▶\(ANSICode.reset) \(ANSICode.bold)\(truncated)\(ANSICode.reset)"
                 } else {
-                    pointer = " "
-                    label = truncated
+                    out += "  \(truncated)"
                 }
-                out += "\(pointer) \(label)"
             }
 
-            // Right pane
+            // --- Right pane ---
+            let rightW = frame.width - rightX - 2
+
             if rightW > 10 {
-                var rightRow = bodyY
-
                 // Preview header + rule
-                out += ANSICode.moveTo(row: rightRow, col: rightX)
+                out += ANSICode.moveTo(row: frame.bodyY, col: rightX)
                 out += "\(ANSICode.bold)Preview\(ANSICode.reset)"
-                rightRow += 1
-                out += ANSICode.moveTo(row: rightRow, col: rightX)
+                out += ANSICode.moveTo(row: frame.bodyY + 1, col: rightX)
                 out += "\(ANSICode.dim)\(String(repeating: "─", count: min(7, rightW)))\(ANSICode.reset)"
-                rightRow += 1
 
-                if let onPreview = onPreview, let preview = onPreview(cursor) {
+                if let preview = cachedPreview {
                     // Playlist name (bold)
-                    out += ANSICode.moveTo(row: rightRow, col: rightX)
-                    let nameStr = preview.name.count > rightW
-                        ? String(preview.name.prefix(rightW - 1)) + "…"
-                        : preview.name
-                    out += "\(ANSICode.bold)\(nameStr)\(ANSICode.reset)"
-                    rightRow += 1
+                    out += ANSICode.moveTo(row: frame.bodyY + 3, col: rightX)
+                    out += "\(ANSICode.bold)\(truncText(preview.name, to: rightW))\(ANSICode.reset)"
 
                     // Track count (dim)
-                    out += ANSICode.moveTo(row: rightRow, col: rightX)
+                    out += ANSICode.moveTo(row: frame.bodyY + 5, col: rightX)
                     out += "\(ANSICode.dim)\(preview.trackCount) tracks\(ANSICode.reset)"
-                    rightRow += 1
-
-                    // Blank line
-                    rightRow += 1
 
                     // Artwork
-                    if let onArtwork = onArtwork, let artPath = onArtwork(cursor) {
-                        let artW = min(16, rightW / 2)
-                        let artH = artW  // square using half-blocks
-                        let artLines = renderArtwork(path: artPath, width: artW, height: artH)
-                        for line in artLines {
-                            if rightRow >= statusY - 1 { break }
-                            out += ANSICode.moveTo(row: rightRow, col: rightX)
-                            out += line
-                            rightRow += 1
-                        }
-                        // Blank line after art
-                        rightRow += 1
+                    var artEndY = frame.bodyY + 8
+                    for (idx, line) in cachedArtLines.enumerated() {
+                        let artRow = frame.bodyY + 8 + idx
+                        if artRow >= frame.statusY - 1 { break }
+                        out += ANSICode.moveTo(row: artRow, col: rightX)
+                        out += "\(line)\(ANSICode.reset)"
+                        artEndY = artRow + 1
                     }
+                    if !cachedArtLines.isEmpty { artEndY += 1 }
 
-                    // Track list
-                    let maxTrackRows = max(0, statusY - 1 - rightRow)
+                    // Track list below artwork
+                    let maxTrackRows = max(0, frame.statusY - 1 - artEndY)
                     for (idx, track) in preview.tracks.prefix(maxTrackRows).enumerated() {
-                        out += ANSICode.moveTo(row: rightRow, col: rightX)
+                        out += ANSICode.moveTo(row: artEndY + idx, col: rightX)
                         let num = "\(ANSICode.dim)\(idx + 1).\(ANSICode.reset) "
-                        let trackStr = track.count > (rightW - 5)
-                            ? String(track.prefix(rightW - 6)) + "…"
-                            : track
-                        out += num + trackStr
-                        rightRow += 1
+                        out += num + truncText(track, to: rightW - 5)
                     }
                 }
             }
         } else {
             // --- Single-pane layout ---
+            let listY = frame.bodyY + 2
             let end = min(items.count, scrollOffset + maxVisible)
+
             for i in scrollOffset..<end {
-                let row = bodyY + (i - scrollOffset)
-                out += ANSICode.moveTo(row: row, col: appX)
+                let row = listY + (i - scrollOffset)
+                out += ANSICode.moveTo(row: row, col: leftX)
 
                 if i == cursor {
-                    out += "\(ANSICode.cyan)▶\(ANSICode.reset) \(ANSICode.bold)\(items[i])\(ANSICode.reset)"
+                    out += "\(ANSICode.cyan)▶\(ANSICode.reset) \(ANSICode.bold)\(truncText(items[i], to: frame.width - 8))\(ANSICode.reset)"
                 } else {
-                    out += "  \(items[i])"
+                    out += "  \(truncText(items[i], to: frame.width - 8))"
                 }
             }
         }
-
-        // Status row
-        out += ANSICode.moveTo(row: statusY, col: appX)
-        out += "\(ANSICode.dim)\(items.count) \(items.count == 1 ? "playlist" : "playlists")\(ANSICode.reset)"
-
-        // Footer
-        out += ANSICode.moveTo(row: footerY, col: appX)
-        out += "\(ANSICode.dim)↑↓ Navigate   Enter Open   p Play   q Quit\(ANSICode.reset)"
 
         print(out, terminator: "")
         fflush(stdout)
     }
 
+    // Initial render without preview (show list immediately)
+    render()
+
+    // Load first preview after initial render is visible
+    refreshPreview()
     render()
 
     while true {
@@ -226,6 +183,7 @@ func runListPicker(
         default:
             break
         }
+        refreshPreview()
         render()
     }
 }
