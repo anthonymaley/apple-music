@@ -198,13 +198,22 @@ func runPlaylistBrowser(
         fflush(stdout)
     }
 
-    // Show list immediately, then load preview
-    render()
-    loadPreview()
+    // Show list immediately, load preview lazily
+    var previewLoaded = false
     render()
 
     while true {
-        guard let key = KeyPress.read() else { continue }
+        let key = KeyPress.read(timeout: previewLoaded ? 60.0 : 0.1)
+
+        // Load preview on first idle moment
+        if !previewLoaded && key == nil {
+            loadPreview()
+            previewLoaded = true
+            render()
+            continue
+        }
+
+        guard let key = key else { continue }
 
         let trackCount = previewCache[plCursor]?.tracks.count ?? 0
 
@@ -212,7 +221,12 @@ func runPlaylistBrowser(
         case .up:
             if focus == .playlists {
                 plCursor = max(0, plCursor - 1)
-                loadPreview()
+                if previewCache[plCursor] != nil {
+                    loadPreview()  // cached — instant
+                } else {
+                    lastLoadedPl = -1  // mark stale, load on next idle
+                    previewLoaded = false
+                }
             } else {
                 trCursor = max(0, trCursor - 1)
             }
@@ -220,7 +234,12 @@ func runPlaylistBrowser(
         case .down:
             if focus == .playlists {
                 plCursor = min(playlists.count - 1, plCursor + 1)
-                loadPreview()
+                if previewCache[plCursor] != nil {
+                    loadPreview()  // cached — instant
+                } else {
+                    lastLoadedPl = -1
+                    previewLoaded = false
+                }
             } else {
                 trCursor = min(trackCount - 1, trCursor + 1)
             }
