@@ -198,7 +198,8 @@ func runPlaylistBrowser(
         fflush(stdout)
     }
 
-    // Initial load
+    // Show list immediately, then load preview
+    render()
     loadPreview()
     render()
 
