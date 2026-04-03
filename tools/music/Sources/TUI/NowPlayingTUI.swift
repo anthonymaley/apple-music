@@ -330,7 +330,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let queueW = frame.width - queueX - 3
-        let footerText = "\(ANSICode.bold)\u{2191}\u{2193}\(ANSICode.reset) Queue   \(ANSICode.bold)Enter\(ANSICode.reset) Play   \(ANSICode.bold)\u{2190}\u{2192}\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)s\(ANSICode.reset) Speakers   \(ANSICode.bold)v\(ANSICode.reset) Volume   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)b\(ANSICode.reset) Back   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.bold)↑↓\(ANSICode.reset) Queue  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) Pause  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Vol  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)b\(ANSICode.reset) Back  \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         let titleText = context != nil ? "Now Playing \u{2014} \(context!.playlistName)" : "Now Playing"
         var out = renderShell(title: titleText, status: "", footer: footerText)
