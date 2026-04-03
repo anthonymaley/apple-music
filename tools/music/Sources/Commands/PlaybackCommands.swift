@@ -247,8 +247,12 @@ struct Radio: ParsableCommand {
             try await backend.runMusic("return name of current track & \" — \" & artist of current track")
         }
         let trackInfo = info.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("Building radio station from: \(trackInfo) ...")
         startRadioStation()
         print("Started radio station from: \(trackInfo)")
+        if isTTY() {
+            runNowPlayingTUI()
+        }
     }
 }
 

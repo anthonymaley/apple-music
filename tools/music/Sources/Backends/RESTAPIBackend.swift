@@ -60,7 +60,9 @@ struct RESTAPIBackend {
     // MARK: - Catalog Search
 
     func searchSongs(query: String, limit: Int = 10) async throws -> [CatalogSong] {
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=")
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
         let (data, status) = try await get("/v1/catalog/\(storefront)/search?term=\(encoded)&types=songs&limit=\(limit)")
         guard (200...299).contains(status) else {
             throw APIError.requestFailed(status)
