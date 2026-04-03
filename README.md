@@ -242,77 +242,17 @@ Claude handles multi-step orchestration — searching the catalog, creating play
 
 Run these commands in a real terminal (not inside Claude Code — TUI requires a TTY). Install `chafa` (`brew install chafa`) for album art in now-playing.
 
-**Now playing** (`music now`) — album art, progress bar, queue, with playback controls:
+**Now playing** (`music now`) — album art, progress bar, queue, playback controls. Press `s` for speakers, `v` for volume mixer, `r` for radio — all return to this screen.
 
-```
-music
+![Now Playing](media/nowplaying.png)
 
-♫ Now Playing                                    Queue
-────────────────────────────────────             ──────────────────
+**Playlist browser** (`music playlist`) — 2-pane browser. Left: playlists. Right: scrollable tracks. `Tab` switches panes, `Enter` plays a track and transitions to Now Playing. `b` returns here.
 
-┌──────────────────────┐  Everything In Its…     ▶ 01  Everything In Its Right Place
-│                      │  Radiohead                 02  Kid A
-│     ALBUM ART        │  Kid A                     03  The National Anthem
-│     (via chafa)      │                            04  How to Disappear Completely
-│                      │  0:05 ───────●──── 4:56    05  Treefingers
-└──────────────────────┘                            06  Optimistic
-                          Output  Kitchen
-                          Volume  60
+![Playlist Browser](media/playlist.jog.jpg)
 
-Controls  ↑↓ Skip   ←→ Seek   Space Pause   s Speakers   v Volume   r Radio   q Quit
-```
+**Speaker picker** (`music speaker`) — toggle AirPlay outputs on/off, adjust per-speaker volume with `←→`. Active speakers show volume bars.
 
-**Playlist browser** (`music playlist`) — browse playlists, preview tracks, play directly:
-
-```
-music
-
-♫ Playlists
-───────────
-
-▶ Favorite Songs                    Favorite Songs
-  My Top Rated                      61 tracks
-  Recently Added                    ──────────────────
-  Recently Played
-  Working Vibes                     ▶ 01  The Break Up — Dam Swindle
-                                       02  A Clodhopper — Roscius
-                                       03  It's Alright — David Morales
-                                       04  Non-Stop — Sammy Bananas
-
-59 playlists
-↑↓ Navigate   Tab Tracks   Enter Open   p Play   s Shuffle   q Quit
-```
-
-**Speaker picker** (`music speaker`) — toggle outputs, adjust volume:
-
-```
-music
-
-♫ AirPlay Speakers
-──────────────────
-
-▶ ● Anthony's MacBook Pro      ███████░░░░░░░░  35%
-  ● Kitchen                    ██████░░░░░░░░░  29%
-  ○ Living Room                                  44%
-
-2 selected
-↑↓ Navigate   Space Toggle   ←→ Volume   Enter Confirm   q Quit
-```
-
-**Volume mixer** (`music volume`) — per-speaker levels:
-
-```
-music
-
-♫ Volume Mixer                     Levels
-──────────────                     ──────────
-
-▶ Anthony's MacBook Pro            Anthony's MacBook Pro   █████████░░░░░░░░  45%
-  Kitchen                          Kitchen                 ██████░░░░░░░░░░░  29%
-
-2 active outputs
-↑↓ Speaker   ←→ Adjust 5%   0-9 Quick Set   q Quit
-```
+![Speaker Picker](media/speakers.png)
 
 ## Status Line
 
