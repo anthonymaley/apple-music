@@ -43,7 +43,65 @@ struct PlaylistBrowse: ParsableCommand {
             return
         }
 
-        if let selected = runListPicker(title: "Playlists", items: names) {
+        // Cache for preview data so we don't re-fetch on every cursor move
+        var previewCache: [Int: PlaylistPreview] = [:]
+
+        let onPreview: (Int) -> PlaylistPreview? = { idx in
+            if let cached = previewCache[idx] { return cached }
+            let plName = names[idx]
+            guard let trackResult = try? syncRun({
+                try await backend.runMusic("""
+                    set trackList to every track of playlist "\(plName)"
+                    set output to ""
+                    set i to 1
+                    set total to count of trackList
+                    repeat with t in trackList
+                        if i > 8 then exit repeat
+                        if output is not "" then set output to output & linefeed
+                        set output to output & name of t & " — " & artist of t
+                        set i to i + 1
+                    end repeat
+                    return (total as text) & "|" & output
+                """)
+            }) else { return nil }
+            let trimmed = trackResult.trimmingCharacters(in: .whitespacesAndNewlines)
+            let parts = trimmed.split(separator: "|", maxSplits: 1)
+            let count = Int(parts.first ?? "0") ?? 0
+            let trackLines = parts.count > 1
+                ? String(parts[1]).components(separatedBy: "\n")
+                : []
+            let preview = PlaylistPreview(name: plName, trackCount: count, tracks: trackLines)
+            previewCache[idx] = preview
+            return preview
+        }
+
+        let onArtwork: (Int) -> String? = { idx in
+            let plName = names[idx]
+            let artPath = "/tmp/music-playlist-art.dat"
+            guard let result = try? syncRun({
+                try await backend.runMusic("""
+                    try
+                        set t to first track of playlist "\(plName)"
+                        set artworks_ to artworks of t
+                        if (count of artworks_) > 0 then
+                            set artData to raw data of item 1 of artworks_
+                            set fileRef to open for access POSIX file "\(artPath)" with write permission
+                            set eof of fileRef to 0
+                            write artData to fileRef
+                            close access fileRef
+                            return "OK"
+                        end if
+                    end try
+                    return "NONE"
+                """)
+            }) else { return nil }
+            if result.trimmingCharacters(in: .whitespacesAndNewlines) == "OK" {
+                return artPath
+            }
+            return nil
+        }
+
+        if let selected = runListPicker(title: "Playlists", items: names, onPreview: onPreview, onArtwork: onArtwork) {
             let playlistName = names[selected]
             var actionItems = [
                 MultiSelectItem(label: "List tracks", sublabel: "", selected: false),
