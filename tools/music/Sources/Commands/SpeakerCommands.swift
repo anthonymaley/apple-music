@@ -164,7 +164,7 @@ private func runSpeakerTUI() throws {
     }
 }
 
-private func fetchSpeakerDevices() throws -> [[String: Any]] {
+func fetchSpeakerDevices() throws -> [[String: Any]] {
     let backend = AppleScriptBackend()
     let result = try syncRun {
         try await backend.runMusic("""
