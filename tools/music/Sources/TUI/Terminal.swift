@@ -30,46 +30,53 @@ enum KeyPress {
     case enter, space, escape
     case char(Character)
 
-    static func read() -> KeyPress? {
-        var buf = [UInt8](repeating: 0, count: 3)
-        let n = Darwin.read(STDIN_FILENO, &buf, 3)
-        guard n > 0 else { return nil }
-
-        if n == 1 {
-            switch buf[0] {
-            case 0x0A, 0x0D: return .enter
-            case 0x20: return .space
-            case 0x1B: return .escape
-            case 0x71: return .char("q")
-            case 0x70: return .char("p")
-            case 0x73: return .char("s")
-            case 0x61: return .char("a")
-            case 0x63: return .char("c")
-            default:
-                let scalar = Unicode.Scalar(buf[0])
-                return .char(Character(scalar))
-            }
-        }
-
-        if n == 3, buf[0] == 0x1B, buf[1] == 0x5B {
-            switch buf[2] {
-            case 0x41: return .up
-            case 0x42: return .down
-            case 0x43: return .right
-            case 0x44: return .left
-            default: return nil
-            }
-        }
-        return nil
+    /// Read one byte from stdin. Returns nil on failure.
+    private static func readByte() -> UInt8? {
+        var byte: UInt8 = 0
+        guard Darwin.read(STDIN_FILENO, &byte, 1) == 1 else { return nil }
+        return byte
     }
 
-    /// Read a keypress with a timeout in seconds. Returns nil if no key pressed within timeout.
+    /// Parse a single keypress by reading one byte at a time.
+    private static func parseKey() -> KeyPress? {
+        guard let byte = readByte() else { return nil }
+
+        if byte == 0x1B {
+            // ESC received — check for escape sequence
+            guard let seq1 = readByte() else { return .escape }
+            if seq1 == 0x5B {
+                guard let seq2 = readByte() else { return .escape }
+                switch seq2 {
+                case 0x41: return .up
+                case 0x42: return .down
+                case 0x43: return .right
+                case 0x44: return .left
+                default: return nil
+                }
+            }
+            return .escape
+        }
+
+        switch byte {
+        case 0x0A, 0x0D: return .enter
+        case 0x20: return .space
+        default:
+            return .char(Character(Unicode.Scalar(byte)))
+        }
+    }
+
+    /// Blocking read — waits indefinitely for a keypress.
+    static func read() -> KeyPress? {
+        return parseKey()
+    }
+
+    /// Read with timeout in seconds. Returns nil if no key pressed within timeout.
     static func read(timeout: Double) -> KeyPress? {
         var pfd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
         let ms = Int32(timeout * 1000)
         let ready = poll(&pfd, 1, ms)
         guard ready > 0, pfd.revents & Int16(POLLIN) != 0 else { return nil }
-        return read()
+        return parseKey()
     }
 }
 
@@ -85,8 +92,11 @@ class TerminalState {
         tcgetattr(STDIN_FILENO, &raw)
         originalTermios = raw
         raw.c_lflag &= ~UInt(ECHO | ICANON | ISIG)
-        raw.c_cc.16 = 1  // VMIN
-        raw.c_cc.17 = 0  // VTIME
+        withUnsafeMutablePointer(to: &raw.c_cc) { ptr in
+            let base = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: cc_t.self)
+            base[Int(VMIN)] = 1
+            base[Int(VTIME)] = 0
+        }
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw)
         isRaw = true
         print(ANSICode.altScreenOn + ANSICode.hideCursor, terminator: "")

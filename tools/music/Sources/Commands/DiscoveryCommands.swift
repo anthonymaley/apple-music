@@ -33,46 +33,15 @@ struct Similar: ParsableCommand {
 
         var similar: [CatalogSong] = []
 
-        let (recData, recStatus) = try syncRun {
-            try await api.get("/v1/me/recommendations?limit=\(limit)")
-        }
-        if (200...299).contains(recStatus) {
-            let recJson = try JSONSerialization.jsonObject(with: recData) as? [String: Any]
-            let recItems = recJson?["data"] as? [[String: Any]] ?? []
-            for item in recItems {
-                let relationships = item["relationships"] as? [String: Any] ?? [:]
-                let contents = relationships["contents"] as? [String: Any] ?? [:]
-                let contentData = contents["data"] as? [[String: Any]] ?? []
-                for content in contentData {
-                    let attrs = content["attributes"] as? [String: Any] ?? [:]
-                    let s = CatalogSong(
-                        id: content["id"] as? String ?? "",
-                        title: attrs["name"] as? String ?? "Unknown",
-                        artist: attrs["artistName"] as? String ?? "Unknown",
-                        album: attrs["albumName"] as? String ?? ""
-                    )
-                    if s.id != song.id { similar.append(s) }
-                }
-            }
-        }
+        // Search for more songs by the same artist (excluding the seed song)
+        let artistSongs = try syncRun { try await api.searchSongs(query: song.artist, limit: limit + 5) }
+        similar += artistSongs.filter { $0.id != song.id }
 
-        if similar.isEmpty {
-            let (relData, relStatus) = try syncRun {
-                try await api.get("/v1/catalog/\(auth.storefront())/songs/\(song.id)/related?limit=\(limit)")
-            }
-            if (200...299).contains(relStatus) {
-                let relJson = try JSONSerialization.jsonObject(with: relData) as? [String: Any]
-                let relItems = relJson?["data"] as? [[String: Any]] ?? []
-                for item in relItems {
-                    let attrs = item["attributes"] as? [String: Any] ?? [:]
-                    similar.append(CatalogSong(
-                        id: item["id"] as? String ?? "",
-                        title: attrs["name"] as? String ?? "Unknown",
-                        artist: attrs["artistName"] as? String ?? "Unknown",
-                        album: attrs["albumName"] as? String ?? ""
-                    ))
-                }
-            }
+        // If not enough results, also search by song title for covers/remixes
+        if similar.count < limit {
+            let titleSongs = try syncRun { try await api.searchSongs(query: song.title, limit: limit) }
+            let existingIDs = Set(similar.map { $0.id } + [song.id])
+            similar += titleSongs.filter { !existingIDs.contains($0.id) }
         }
 
         let cache = ResultCache()
