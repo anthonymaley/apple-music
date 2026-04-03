@@ -43,11 +43,11 @@ struct PlaylistBrowse: ParsableCommand {
             return
         }
 
-        // Cache for preview data so we don't re-fetch on every cursor move
-        var previewCache: [Int: PlaylistPreview] = [:]
+        // Track data cache — fetches ALL tracks for scrollable browsing
+        var trackCache: [Int: PlaylistPreview] = [:]
 
-        let onPreview: (Int) -> PlaylistPreview? = { idx in
-            if let cached = previewCache[idx] { return cached }
+        let onTracks: (Int) -> PlaylistPreview? = { idx in
+            if let cached = trackCache[idx] { return cached }
             let plName = names[idx]
             guard let trackResult = try? syncRun({
                 try await backend.runMusic("""
@@ -56,7 +56,6 @@ struct PlaylistBrowse: ParsableCommand {
                     set i to 1
                     set total to count of trackList
                     repeat with t in trackList
-                        if i > 8 then exit repeat
                         if output is not "" then set output to output & linefeed
                         set output to output & name of t & " — " & artist of t
                         set i to i + 1
@@ -71,7 +70,7 @@ struct PlaylistBrowse: ParsableCommand {
                 ? String(parts[1]).components(separatedBy: "\n")
                 : []
             let preview = PlaylistPreview(name: plName, trackCount: count, tracks: trackLines)
-            previewCache[idx] = preview
+            trackCache[idx] = preview
             return preview
         }
 
@@ -101,30 +100,49 @@ struct PlaylistBrowse: ParsableCommand {
             return nil
         }
 
-        if let selected = runListPicker(title: "Playlists", items: names, onPreview: onPreview, onArtwork: onArtwork) {
-            let playlistName = names[selected]
-            var actionItems = [
-                MultiSelectItem(label: "List tracks", sublabel: "", selected: false),
-                MultiSelectItem(label: "Shuffle play", sublabel: "", selected: false),
-                MultiSelectItem(label: "Play in order", sublabel: "", selected: false),
-            ]
-            let result = runMultiSelectList(title: playlistName, items: &actionItems)
+        let action = runPlaylistBrowser(
+            playlists: names,
+            onTracks: onTracks,
+            onArtwork: onArtwork
+        )
 
-            guard case .confirmed(let indices) = result else { return }
-            let chosen = Set(indices)
-
-            // Play first (so tracks list appears after playback starts)
-            if chosen.contains(1) {
-                _ = try syncRun { try await backend.runMusic("set shuffle enabled to true") }
-                _ = try syncRun { try await backend.runMusic("play playlist \"\(playlistName)\"") }
-            } else if chosen.contains(2) {
-                _ = try syncRun { try await backend.runMusic("set shuffle enabled to false") }
-                _ = try syncRun { try await backend.runMusic("play playlist \"\(playlistName)\"") }
+        switch action {
+        case .playTrack(let plIdx, let trIdx):
+            let plName = names[plIdx]
+            let trackLine = trackCache[plIdx]?.tracks[trIdx] ?? ""
+            // Parse "Title — Artist" to play the specific track
+            let trackParts = trackLine.split(separator: "—", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            let title = trackParts.first ?? ""
+            let artist = trackParts.count > 1 ? trackParts[1] : ""
+            let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
+            _ = try syncRun {
+                try await backend.runMusic("""
+                    set results to (every track of playlist "\(plName)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
+                    if (count of results) = 0 then
+                        set results to (every track of playlist "\(plName)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
+                    end if
+                    if (count of results) > 0 then
+                        play item 1 of results
+                    end if
+                """)
             }
+            showNowPlaying(waitForPlay: true)
 
-            if chosen.contains(0) {
-                try showPlaylistTracks(name: playlistName, json: false)
-            }
+        case .playPlaylist(let idx):
+            let plName = names[idx]
+            _ = try syncRun { try await backend.runMusic("set shuffle enabled to false") }
+            _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
+            showNowPlaying(waitForPlay: true)
+
+        case .shufflePlaylist(let idx):
+            let plName = names[idx]
+            _ = try syncRun { try await backend.runMusic("set shuffle enabled to true") }
+            _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
+            showNowPlaying(waitForPlay: true)
+
+        case .none:
+            break
         }
     }
 }
