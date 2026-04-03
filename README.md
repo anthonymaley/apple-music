@@ -44,11 +44,11 @@ Control Apple Music, AirPlay speakers, and AirPods from Claude Code or the termi
 
 ## Three Ways to Use It
 
-| Layer | How | Token cost |
-|-------|-----|-----------|
-| **Slash commands** (`/music:play`) | Type and run, instant | None |
-| **CLI** (`music playlist create ...`) | Terminal commands, scriptable | None |
-| **Natural language** ("play house on the kitchen") | Claude orchestrates multiple CLI calls | Normal |
+| Layer | How | Setup | Token cost |
+|-------|-----|-------|-----------|
+| **Slash commands** (`/music:play`) | Type and run, instant | None | None |
+| **CLI** (`music playlist create ...`) | Terminal commands, scriptable | Apple Developer account | None |
+| **Natural language** ("play house on the kitchen") | Claude orchestrates multiple CLI calls | None | Normal |
 
 ## Install
 
@@ -157,7 +157,12 @@ Instant execution. No AI reasoning, no token cost. Type `/music:` and tab to dis
 
 ## CLI Commands
 
-The `music` CLI runs directly in your terminal. Requires building from source (see [Advanced Features](#advanced-features-optional-requires-apple-developer-account)).
+```
+  ┌─────────────────────────────────────────────────────────────┐
+  │  Requires Apple Developer account ($99/yr) + build from     │
+  │  source. See "Advanced Features" above for setup.           │
+  └─────────────────────────────────────────────────────────────┘
+```
 
 ### Playlist Management
 
