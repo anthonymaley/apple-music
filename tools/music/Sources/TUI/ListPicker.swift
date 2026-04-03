@@ -75,12 +75,9 @@ func runPlaylistBrowser(
         if previewCache[plCursor] == nil {
             previewCache[plCursor] = onTracks(plCursor)
         }
+        // Artwork disabled in playlist browser — chafa conflicts with raw mode
         if artCache[plCursor] == nil {
-            if let onArtwork = onArtwork, let path = onArtwork(plCursor) {
-                artCache[plCursor] = renderArtwork(path: path, width: 12, height: 12)
-            } else {
-                artCache[plCursor] = []
-            }
+            artCache[plCursor] = []
         }
 
         // Reset track cursor when playlist changes

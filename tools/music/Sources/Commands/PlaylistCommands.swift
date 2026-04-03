@@ -56,6 +56,7 @@ struct PlaylistBrowse: ParsableCommand {
                     set i to 1
                     set total to count of trackList
                     repeat with t in trackList
+                        if i > 50 then exit repeat
                         if output is not "" then set output to output & linefeed
                         set output to output & name of t & " — " & artist of t
                         set i to i + 1
