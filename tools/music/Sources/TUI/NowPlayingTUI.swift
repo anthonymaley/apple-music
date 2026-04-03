@@ -282,6 +282,293 @@ func startRadioStation() {
     _ = try? syncRun { try await backend.runMusic("play playlist \"\(playlistName.replacingOccurrences(of: "\"", with: "\\\""))\"") }
 }
 
+// MARK: - Now Playing result for context-aware mode
+
+enum NowPlayingResult {
+    case back   // user pressed b/Esc — return to browser
+    case quit   // user pressed q
+}
+
+// MARK: - Context-aware Now Playing (used from playlist browser)
+
+func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
+    let terminal = TerminalState.shared
+    terminal.enterRawMode()
+    defer { terminal.exitRawMode() }
+
+    // --- Layout ---
+    let artX = 3
+    let artY = 11
+    let artW = 28
+    let metaX = 34
+    let metaY = 11
+    let metaW = 34
+    let queueX = 74
+    let queueY = 11
+    let progBarW = 18
+
+    var artLines: [String] = []
+    var lastTrackName = ""
+    var queueCursor = context?.startIndex ?? 0
+    var queueScroll = 0
+
+    // Build queue entries from context
+    let contextTracks: [String] = context?.tracks ?? []
+
+    func findCurrentTrackIndex(np: NowPlayingState) -> Int? {
+        // Match by track name in the context track list
+        for (i, track) in contextTracks.enumerated() {
+            let parts = track.split(separator: "\u{2014}", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            let title = parts.first ?? ""
+            if title == np.track || np.track.contains(title) || title.contains(np.track) {
+                return i
+            }
+        }
+        return nil
+    }
+
+    func render(_ np: NowPlayingState) {
+        let frame = ScreenFrame.current()
+        let queueW = frame.width - queueX - 3
+        let footerText = "\(ANSICode.bold)\u{2191}\u{2193}\(ANSICode.reset) Queue   \(ANSICode.bold)Enter\(ANSICode.reset) Play   \(ANSICode.bold)\u{2190}\u{2192}\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)b\(ANSICode.reset) Back   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+
+        let titleText = context != nil ? "Now Playing \u{2014} \(context!.playlistName)" : "Now Playing"
+        var out = renderShell(title: titleText, status: "", footer: footerText)
+
+        // Queue header
+        if queueW >= 24 {
+            out += ANSICode.moveTo(row: 5, col: queueX)
+            out += "\(ANSICode.bold)\(ANSICode.cyan)Queue\(ANSICode.reset)"
+            out += ANSICode.moveTo(row: 6, col: queueX)
+            out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 18))\(ANSICode.reset)"
+        }
+
+        // --- Cover art ---
+        let artSize = min(artW, 28, frame.statusY - artY - 2)
+        for i in 0..<artSize {
+            if i < artLines.count {
+                out += ANSICode.moveTo(row: artY + i, col: artX)
+                out += "\(artLines[i])\(ANSICode.reset)"
+            }
+        }
+
+        // --- Metadata ---
+        out += ANSICode.moveTo(row: metaY, col: metaX)
+        out += "\(ANSICode.bold)\(truncText(np.track, to: metaW))\(ANSICode.reset)"
+
+        out += ANSICode.moveTo(row: metaY + 2, col: metaX)
+        out += "\(ANSICode.bold)\(truncText(np.artist, to: metaW))\(ANSICode.reset)"
+
+        out += ANSICode.moveTo(row: metaY + 4, col: metaX)
+        out += "\(ANSICode.dim)\(truncText(np.album, to: metaW))\(ANSICode.reset)"
+
+        // Progress bar
+        let elapsed = formatTime(np.position)
+        let total = formatTime(np.duration)
+        let ratio = np.duration > 0 ? Double(np.position) / Double(np.duration) : 0
+        let knobIdx = max(0, min(progBarW - 1, Int(ratio * Double(progBarW - 1))))
+
+        var barStr = ""
+        for i in 0..<progBarW {
+            if i == knobIdx {
+                barStr += "\(ANSICode.bold)\u{25CF}\(ANSICode.reset)"
+            } else {
+                barStr += "\(ANSICode.dim)\u{2500}\(ANSICode.reset)"
+            }
+        }
+
+        out += ANSICode.moveTo(row: metaY + 8, col: metaX)
+        out += "\(elapsed) \(barStr) \(total)"
+
+        // Outputs block
+        let labelW = 8
+        if !np.speakers.isEmpty {
+            let primarySpk = np.speakers.first!
+            out += ANSICode.moveTo(row: metaY + 12, col: metaX)
+            out += "\(ANSICode.dim)Output\(ANSICode.reset)"
+            out += ANSICode.moveTo(row: metaY + 12, col: metaX + labelW)
+            out += truncText(primarySpk.name, to: metaW - labelW)
+
+            if np.speakers.count > 1 {
+                let mixStr = np.speakers.map { "\($0.name) \($0.volume)" }.joined(separator: ", ")
+                out += ANSICode.moveTo(row: metaY + 14, col: metaX)
+                out += "\(ANSICode.dim)Mix\(ANSICode.reset)"
+                out += ANSICode.moveTo(row: metaY + 14, col: metaX + labelW)
+                out += "\(ANSICode.dim)\(truncText(mixStr, to: metaW - labelW))\(ANSICode.reset)"
+            }
+
+            out += ANSICode.moveTo(row: metaY + 16, col: metaX)
+            out += "\(ANSICode.dim)Volume\(ANSICode.reset)"
+            out += ANSICode.moveTo(row: metaY + 16, col: metaX + labelW)
+            out += "\(primarySpk.volume)"
+        }
+
+        // --- Queue (from context) ---
+        if queueW >= 24 && !contextTracks.isEmpty {
+            let currentIdx = findCurrentTrackIndex(np: np)
+            let queueVisible = max(1, min(contextTracks.count, frame.statusY - queueY - 2))
+
+            if queueCursor < queueScroll { queueScroll = queueCursor }
+            if queueCursor >= queueScroll + queueVisible { queueScroll = queueCursor - queueVisible + 1 }
+
+            let qEnd = min(contextTracks.count, queueScroll + queueVisible)
+            for i in queueScroll..<qEnd {
+                let row = queueY + (i - queueScroll)
+                out += ANSICode.moveTo(row: row, col: queueX)
+                let idx = String(format: "%02d", i + 1)
+                let rowText = truncText(contextTracks[i], to: queueW - 6)
+
+                if i == queueCursor {
+                    let marker = (i == currentIdx) ? "\(ANSICode.green)\u{25B6}" : "\(ANSICode.cyan)\u{25B6}"
+                    out += "\(marker)\(ANSICode.reset) \(ANSICode.bold)\(idx)  \(rowText)\(ANSICode.reset)"
+                } else if i == currentIdx {
+                    out += "\(ANSICode.green)\u{25B6}\(ANSICode.reset) \(ANSICode.bold)\(idx)  \(rowText)\(ANSICode.reset)"
+                } else {
+                    out += "\(ANSICode.dim)  \(idx)  \(rowText)\(ANSICode.reset)"
+                }
+            }
+        } else if queueW >= 24 {
+            // No context — fall back to pollSurroundingTracks display
+            let trackList = pollSurroundingTracks()
+            let queueVisible = min(8, frame.statusY - queueY - 2)
+            for (i, entry) in trackList.prefix(queueVisible).enumerated() {
+                out += ANSICode.moveTo(row: queueY + i, col: queueX)
+                let idx = String(format: "%02d", entry.index)
+                let rowText = truncText("\(entry.name) \u{2014} \(entry.artist)", to: queueW - 6)
+                if entry.isCurrent {
+                    out += "\(ANSICode.green)\u{25B6}\(ANSICode.reset) \(ANSICode.bold)\(idx)  \(rowText)\(ANSICode.reset)"
+                } else {
+                    out += "\(ANSICode.dim)  \(idx)  \(rowText)\(ANSICode.reset)"
+                }
+            }
+        }
+
+        print(out, terminator: "")
+        fflush(stdout)
+    }
+
+    func renderStopped() {
+        let frame = ScreenFrame.current()
+        let footerText = "\(ANSICode.bold)b\(ANSICode.reset) Back   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        var out = renderShell(title: "Now Playing", status: "", footer: footerText)
+        out += ANSICode.moveTo(row: frame.bodyY + 2, col: 3)
+        out += "\(ANSICode.dim)Nothing playing.\(ANSICode.reset)"
+        print(out, terminator: "")
+        fflush(stdout)
+    }
+
+    func refreshArtwork() {
+        let frame = ScreenFrame.current()
+        let artSize = min(artW, 28, frame.statusY - artY - 2)
+        if let artPath = extractArtwork() {
+            artLines = artworkToAscii(path: artPath, width: artW, height: artSize)
+        } else {
+            artLines = []
+        }
+    }
+
+    // Drain all pending input from stdin
+    func flushStdin() {
+        var pfd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+        while poll(&pfd, 1, 0) > 0 && pfd.revents & Int16(POLLIN) != 0 {
+            var discard = [UInt8](repeating: 0, count: 256)
+            _ = Darwin.read(STDIN_FILENO, &discard, 256)
+        }
+    }
+
+    // Initial render
+    let backend = AppleScriptBackend()
+    if let np = pollNowPlaying() {
+        lastTrackName = np.track
+        refreshArtwork()
+        // Sync queue cursor to current track
+        if let idx = findCurrentTrackIndex(np: np) {
+            queueCursor = idx
+        }
+        render(np)
+    } else {
+        renderStopped()
+    }
+
+    while true {
+        let key = KeyPress.read(timeout: 1.0)
+
+        if let key = key {
+            switch key {
+            case .up:
+                if !contextTracks.isEmpty {
+                    queueCursor = max(0, queueCursor - 1)
+                } else {
+                    _ = try? syncRun { try await backend.runMusic("previous track") }
+                }
+            case .down:
+                if !contextTracks.isEmpty {
+                    queueCursor = min(contextTracks.count - 1, queueCursor + 1)
+                } else {
+                    _ = try? syncRun { try await backend.runMusic("next track") }
+                }
+            case .enter:
+                if !contextTracks.isEmpty && queueCursor < contextTracks.count {
+                    // Play the selected track from context
+                    let trackLine = contextTracks[queueCursor]
+                    let trackParts = trackLine.split(separator: "\u{2014}", maxSplits: 1)
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                    let title = trackParts.first ?? ""
+                    let artist = trackParts.count > 1 ? trackParts[1] : ""
+                    let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+                    let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
+                    let plName = context?.playlistName ?? ""
+                    _ = try? syncRun {
+                        try await backend.runMusic("""
+                            set results to (every track of playlist "\(plName)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
+                            if (count of results) = 0 then
+                                set results to (every track of playlist "\(plName)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
+                            end if
+                            if (count of results) > 0 then play item 1 of results
+                        """)
+                    }
+                }
+            case .left:
+                _ = try? syncRun {
+                    try await backend.runMusic("set player position to (player position - 30)")
+                }
+            case .right:
+                _ = try? syncRun {
+                    try await backend.runMusic("set player position to (player position + 30)")
+                }
+            case .space:
+                _ = try? syncRun { try await backend.runMusic("playpause") }
+            case .char("r"):
+                startRadioStation()
+            case .char("b"), .escape:
+                return .back
+            case .char("q"):
+                return .quit
+            default:
+                break
+            }
+        }
+
+        // Re-poll and render
+        if let np = pollNowPlaying() {
+            if np.track != lastTrackName {
+                lastTrackName = np.track
+                refreshArtwork()
+                // Sync queue cursor to current track if it changed
+                if let idx = findCurrentTrackIndex(np: np) {
+                    queueCursor = idx
+                }
+                flushStdin()
+            }
+            render(np)
+        } else {
+            renderStopped()
+        }
+    }
+}
+
+// MARK: - Standalone Now Playing (for `music now`)
+
 func runNowPlayingTUI() {
     let terminal = TerminalState.shared
     terminal.enterRawMode()

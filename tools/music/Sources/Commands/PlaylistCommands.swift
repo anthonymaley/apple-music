@@ -75,75 +75,58 @@ struct PlaylistBrowse: ParsableCommand {
             return preview
         }
 
-        let onArtwork: (Int) -> String? = { idx in
-            let plName = names[idx]
-            let artPath = "/tmp/music-playlist-art.dat"
-            guard let result = try? syncRun({
-                try await backend.runMusic("""
-                    try
-                        set t to first track of playlist "\(plName)"
-                        set artworks_ to artworks of t
-                        if (count of artworks_) > 0 then
-                            set artData to raw data of item 1 of artworks_
-                            set fileRef to open for access POSIX file "\(artPath)" with write permission
-                            set eof of fileRef to 0
-                            write artData to fileRef
-                            close access fileRef
-                            return "OK"
+        var browserState: BrowserState? = nil
+
+        while true {
+            let result = runPlaylistBrowser(
+                playlists: names,
+                onTracks: onTracks,
+                savedState: browserState
+            )
+
+            switch result {
+            case .playTrack(let plIdx, let trIdx, let ctx, let state):
+                browserState = state
+                let plName = names[plIdx]
+                let trackLine = trackCache[plIdx]?.tracks[trIdx] ?? ""
+                let trackParts = trackLine.split(separator: "\u{2014}", maxSplits: 1)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                let title = trackParts.first ?? ""
+                let artist = trackParts.count > 1 ? trackParts[1] : ""
+                let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+                let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
+                _ = try syncRun {
+                    try await backend.runMusic("""
+                        set results to (every track of playlist "\(plName)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
+                        if (count of results) = 0 then
+                            set results to (every track of playlist "\(plName)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
                         end if
-                    end try
-                    return "NONE"
-                """)
-            }) else { return nil }
-            if result.trimmingCharacters(in: .whitespacesAndNewlines) == "OK" {
-                return artPath
+                        if (count of results) > 0 then play item 1 of results
+                    """)
+                }
+                let npResult = runNowPlayingWithContext(ctx)
+                if case .quit = npResult { return }
+                // .back -> loop continues, browser restores state
+
+            case .playPlaylist(let idx, let ctx, let state):
+                browserState = state
+                let plName = names[idx]
+                _ = try syncRun { try await backend.runMusic("set shuffle enabled to false") }
+                _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
+                let npResult = runNowPlayingWithContext(ctx)
+                if case .quit = npResult { return }
+
+            case .shufflePlaylist(let idx, let ctx, let state):
+                browserState = state
+                let plName = names[idx]
+                _ = try syncRun { try await backend.runMusic("set shuffle enabled to true") }
+                _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
+                let npResult = runNowPlayingWithContext(ctx)
+                if case .quit = npResult { return }
+
+            case .quit:
+                return
             }
-            return nil
-        }
-
-        let action = runPlaylistBrowser(
-            playlists: names,
-            onTracks: onTracks,
-            onArtwork: onArtwork
-        )
-
-        switch action {
-        case .playTrack(let plIdx, let trIdx):
-            let plName = names[plIdx]
-            let trackLine = trackCache[plIdx]?.tracks[trIdx] ?? ""
-            // Parse "Title — Artist" to play the specific track
-            let trackParts = trackLine.split(separator: "—", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            let title = trackParts.first ?? ""
-            let artist = trackParts.count > 1 ? trackParts[1] : ""
-            let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
-            _ = try syncRun {
-                try await backend.runMusic("""
-                    set results to (every track of playlist "\(plName)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
-                    if (count of results) = 0 then
-                        set results to (every track of playlist "\(plName)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
-                    end if
-                    if (count of results) > 0 then
-                        play item 1 of results
-                    end if
-                """)
-            }
-            showNowPlaying(waitForPlay: true)
-
-        case .playPlaylist(let idx):
-            let plName = names[idx]
-            _ = try syncRun { try await backend.runMusic("set shuffle enabled to false") }
-            _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
-            showNowPlaying(waitForPlay: true)
-
-        case .shufflePlaylist(let idx):
-            let plName = names[idx]
-            _ = try syncRun { try await backend.runMusic("set shuffle enabled to true") }
-            _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
-            showNowPlaying(waitForPlay: true)
-
-        case .none:
-            break
         }
     }
 }
