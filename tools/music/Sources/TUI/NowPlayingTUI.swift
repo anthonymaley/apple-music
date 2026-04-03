@@ -330,7 +330,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let queueW = frame.width - queueX - 3
-        let footerText = "\(ANSICode.bold)\u{2191}\u{2193}\(ANSICode.reset) Queue   \(ANSICode.bold)Enter\(ANSICode.reset) Play   \(ANSICode.bold)\u{2190}\u{2192}\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)s\(ANSICode.reset) Speakers   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)b\(ANSICode.reset) Back   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.bold)\u{2191}\u{2193}\(ANSICode.reset) Queue   \(ANSICode.bold)Enter\(ANSICode.reset) Play   \(ANSICode.bold)\u{2190}\u{2192}\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)s\(ANSICode.reset) Speakers   \(ANSICode.bold)v\(ANSICode.reset) Volume   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)b\(ANSICode.reset) Back   \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         let titleText = context != nil ? "Now Playing \u{2014} \(context!.playlistName)" : "Now Playing"
         var out = renderShell(title: titleText, status: "", footer: footerText)
@@ -564,6 +564,23 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
                     })
                 }
                 terminal.enterRawMode()
+            case .char("v"):
+                // Volume mixer as modal subflow
+                terminal.exitRawMode()
+                if let devices = try? fetchSpeakerDevices() {
+                    var speakers = devices.compactMap { d -> MixerSpeaker? in
+                        guard d["selected"] as? Bool == true else { return nil }
+                        return MixerSpeaker(name: d["name"] as! String, volume: d["volume"] as! Int)
+                    }
+                    if !speakers.isEmpty {
+                        runVolumeMixer(speakers: &speakers) { name, volume in
+                            _ = try? syncRun {
+                                try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(volume)")
+                            }
+                        }
+                    }
+                }
+                terminal.enterRawMode()
             case .char("b"), .escape:
                 return .back
             case .char("q"):
@@ -616,7 +633,7 @@ func runNowPlayingTUI() {
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let queueW = frame.width - queueX - 3
-        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑ ↓\(ANSICode.reset) Skip   \(ANSICode.bold)← →\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)s\(ANSICode.reset) Speakers   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑ ↓\(ANSICode.reset) Skip   \(ANSICode.bold)← →\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)s\(ANSICode.reset) Speakers   \(ANSICode.bold)v\(ANSICode.reset) Volume   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         var out = renderShell(title: "Now Playing", status: "", footer: footerText)
 
@@ -800,6 +817,22 @@ func runNowPlayingTUI() {
                         }
                         return "vol: \(vol)"
                     })
+                }
+                terminal.enterRawMode()
+            case .char("v"):
+                terminal.exitRawMode()
+                if let devices = try? fetchSpeakerDevices() {
+                    var speakers = devices.compactMap { d -> MixerSpeaker? in
+                        guard d["selected"] as? Bool == true else { return nil }
+                        return MixerSpeaker(name: d["name"] as! String, volume: d["volume"] as! Int)
+                    }
+                    if !speakers.isEmpty {
+                        runVolumeMixer(speakers: &speakers) { name, volume in
+                            _ = try? syncRun {
+                                try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(volume)")
+                            }
+                        }
+                    }
                 }
                 terminal.enterRawMode()
             case .char("q"), .escape:
