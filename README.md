@@ -207,6 +207,13 @@ music search "Fouk" --json --limit 20   # structured search results
 music playlist list --json               # structured playlist list
 ```
 
+```
+  ┌─────────────────────────────────────────────────────────────┐
+  │  End of Apple Developer account section. Everything below    │
+  │  works with zero setup.                                      │
+  └─────────────────────────────────────────────────────────────┘
+```
+
 ## Natural Language (Skill)
 
 For anything multi-step, just talk. Claude composes the right sequence of CLI calls automatically.
