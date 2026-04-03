@@ -62,6 +62,15 @@ enum KeyPress {
         }
         return nil
     }
+
+    /// Read a keypress with a timeout in seconds. Returns nil if no key pressed within timeout.
+    static func read(timeout: Double) -> KeyPress? {
+        var pfd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+        let ms = Int32(timeout * 1000)
+        let ready = poll(&pfd, 1, ms)
+        guard ready > 0, pfd.revents & Int16(POLLIN) != 0 else { return nil }
+        return read()
+    }
 }
 
 class TerminalState {
