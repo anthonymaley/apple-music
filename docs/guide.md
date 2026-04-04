@@ -10,7 +10,7 @@ One name for everything: **`music`**.
 
 | Surface | Name | Example |
 |---------|------|---------|
-| Marketplace listing | Apple Music for Claude Code | `/install anthonymaley/music` |
+| Marketplace listing | Apple Music for Claude Code | `/plugin marketplace add anthonymaley/music` |
 | Slash commands | `/music:*` | `/music:play`, `/music:stop` |
 | CLI binary | `music` | `music now`, `music search "Fouk"` |
 | Skill (natural language) | `music` | just talk to Claude |
@@ -23,7 +23,7 @@ There are four interaction layers, from quickest to most flexible:
 
 ### 1. Slash Commands (`/music:*`)
 
-Fast, instant, no AI reasoning. Type `/music:` and tab to discover all 13 commands.
+Fast, instant, no AI reasoning. Type `/music:` and tab to discover all 14 commands.
 
 Every slash command has `disable-model-invocation: true` — they execute immediately as shell scripts, with zero token cost. The output appears directly in the chat.
 
@@ -41,6 +41,7 @@ Every slash command has `disable-model-invocation: true` — they execute immedi
 /music:stop kitchen              Remove kitchen from the speaker group
 /music:now                       What's currently playing
 /music:shuffle                   Toggle shuffle on/off
+/music:radio                     Start radio station from current track
 ```
 
 **Speakers**
@@ -123,7 +124,7 @@ Enable in `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/plugins/music/scripts/statusline.sh"
+    "command": "~/.claude/plugins/cache/music@anthonymaley-music/scripts/statusline.sh"
   }
 }
 ```
@@ -147,7 +148,7 @@ music playlist list --json
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
 │  │ Slash Commands│  │   Skill      │  │   Status Line    │   │
 │  │ /music:*     │  │   (music)     │  │   statusline.sh  │   │
-│  │ 13 commands  │  │   natural    │  │   now playing    │   │
+│  │ 14 commands  │  │   natural    │  │   now playing    │   │
 │  │ instant exec │  │   language   │  │   zero tokens    │   │
 │  └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘   │
 │         │                 │                    │              │
@@ -228,7 +229,7 @@ apple-music/
 ├── .claude-plugin/
 │   ├── plugin.json              # Plugin metadata (name: "music", v1.3.0)
 │   └── marketplace.json         # Marketplace listing
-├── commands/                    # 13 slash commands
+├── commands/                    # 14 slash commands
 │   ├── play.md                  # /music:play [query] [speaker] [vol%]
 │   ├── pause.md                 # /music:pause
 │   ├── skip.md                  # /music:skip
@@ -241,6 +242,7 @@ apple-music/
 │   ├── search.md                # /music:search <query>
 │   ├── add.md                   # /music:add <title> <artist>
 │   ├── similar.md               # /music:similar
+│   ├── radio.md                 # /music:radio
 │   └── playlist.md              # /music:playlist <action> [args]
 ├── skills/music/
 │   └── SKILL.md                 # Conversational skill (music CLI reference)

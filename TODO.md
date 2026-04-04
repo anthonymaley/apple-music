@@ -23,7 +23,6 @@
 - Playlist browser: add `/` search within playlists and tracks
 - Now playing: consider `n`/`p` as alternative skip keys (non-repeating)
 - Volume mixer: highlight selected channel more strongly
-- Consider per-speaker stop via slash command (`/music:stop kitchen`)
 - End-to-end testing: playlist with comma in name, overlapping speaker names, 200+ track playlist
 
 ## Key Context
