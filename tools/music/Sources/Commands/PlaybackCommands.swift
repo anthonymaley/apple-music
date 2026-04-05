@@ -9,11 +9,11 @@ struct Play: ParsableCommand {
     @Option(name: .long, help: "Song name") var song: String?
     @Option(name: .long, help: "Artist name") var artist: String?
     @Flag(name: .long, help: "Output JSON") var json = false
-    @Flag(name: .shortAndLong, help: "Show diagnostic output") var verbose = false
+    @Flag(name: [.customShort("v"), .customLong("verbose")], help: "Show diagnostic output") var verboseFlag = false
     @Flag(name: .long, help: "Skip speaker wake cycle") var noWake = false
 
     func run() throws {
-        Music.verbose = verbose
+        Music.verbose = verboseFlag
         Music.isJSON = json
         Music.noWake = noWake
         let backend = AppleScriptBackend()
@@ -83,8 +83,76 @@ struct Play: ParsableCommand {
 
             // Check for trailing "shuffle" keyword
             let hasShuffle = args.last?.lowercased() == "shuffle"
-            let nameArgs = hasShuffle ? Array(args.dropLast()) : args
-            let playlistName = nameArgs.joined(separator: " ")
+            var remaining = hasShuffle ? Array(args.dropLast()) : args
+
+            // Extract volume (last arg if it's a number 0-100)
+            var speakerVolume: Int? = nil
+            if remaining.count >= 2, let vol = Int(remaining.last!), (0...100).contains(vol) {
+                speakerVolume = vol
+                remaining = Array(remaining.dropLast())
+            }
+
+            // Try to match a speaker name from the args (longest match wins)
+            var matchedSpeaker: String? = nil
+            var playlistName: String
+            let joinedLower = remaining.joined(separator: " ").lowercased()
+
+            if let devices = try? fetchSpeakerDevices() {
+                let deviceNames = devices.map { $0["name"] as! String }
+                var bestLen = 0
+                for devName in deviceNames {
+                    let devLower = devName.lowercased()
+                    if joinedLower.contains(devLower) && devLower.count > bestLen {
+                        matchedSpeaker = devName
+                        bestLen = devLower.count
+                    }
+                }
+                if let speaker = matchedSpeaker {
+                    verbose("matched speaker \"\(speaker)\" from args")
+                    // Remove speaker name from the joined string to get playlist name
+                    let cleaned = joinedLower.replacingOccurrences(of: speaker.lowercased(), with: "")
+                        .trimmingCharacters(in: .whitespaces)
+                    playlistName = cleaned.isEmpty ? "" : cleaned
+                    // Restore original case from args for the playlist name
+                    if !cleaned.isEmpty {
+                        // Re-join args without the speaker words
+                        let speakerWords = Set(speaker.lowercased().split(separator: " ").map(String.init))
+                        let playlistArgs = remaining.filter { !speakerWords.contains($0.lowercased()) }
+                        playlistName = playlistArgs.joined(separator: " ")
+                    }
+                } else {
+                    playlistName = remaining.joined(separator: " ")
+                }
+            } else {
+                playlistName = remaining.joined(separator: " ")
+            }
+
+            // Route to speaker with wake cycle
+            if let speaker = matchedSpeaker {
+                if !Music.noWake {
+                    let results = withStatus("Waking speakers...") {
+                        wakeSpeakers([speaker], backend: backend)
+                    }
+                    for r in results {
+                        if r.verifiedSelected {
+                            print("Woke \(r.name).")
+                        } else {
+                            print("\(r.name): wake cycle completed but verification uncertain.")
+                        }
+                    }
+                } else {
+                    _ = try syncRun {
+                        try await backend.runMusic("set selected of AirPlay device \"\(speaker)\" to true")
+                    }
+                }
+                // Set volume if specified
+                if let vol = speakerVolume {
+                    _ = try syncRun {
+                        try await backend.runMusic("set sound volume of AirPlay device \"\(speaker)\" to \(vol)")
+                    }
+                    print("\(speaker) [\(vol)]")
+                }
+            }
 
             if hasShuffle {
                 _ = try syncRun {
@@ -92,8 +160,20 @@ struct Play: ParsableCommand {
                 }
             }
 
-            _ = try syncRun {
-                try await backend.runMusic("play playlist \"\(playlistName)\"")
+            if !playlistName.isEmpty {
+                _ = try syncRun {
+                    try await backend.runMusic("play playlist \"\(playlistName)\"")
+                }
+            } else if matchedSpeaker != nil {
+                // Speaker routed but no playlist specified — just resume
+                _ = try syncRun {
+                    try await backend.runMusic("play")
+                }
+            } else {
+                // No speaker, no playlist — shouldn't happen but resume
+                _ = try syncRun {
+                    try await backend.runMusic("play")
+                }
             }
             showNowPlaying(json: json, waitForPlay: true)
             return
