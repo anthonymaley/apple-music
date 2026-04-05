@@ -211,7 +211,11 @@ music play "Working Vibes" kitchen 20 shuffle  # with shuffle
 music play "Working Vibes" "sonos arc" 60      # multi-word speaker names
 ```
 
-A wake cycle runs automatically when a speaker is detected — deselects then reselects the speaker to fix the common AirPlay "ghost connection" problem where a speaker shows as connected but isn't playing audio. Use `--no-wake` to skip it, or `--verbose` to see each step:
+A wake cycle runs automatically when a speaker is detected — deselects then reselects the speaker to fix the common AirPlay "ghost connection" problem where a speaker shows as connected but isn't playing audio.
+
+**Inherited-session wake:** If Apple Music is already playing to an AirPlay speaker from a previous session, `music play` (with or without a playlist name) auto-detects the non-local speakers and wakes them before playback. No need to specify the speaker name — it just works.
+
+Use `--no-wake` to skip it, or `--verbose` to see each step:
 
 ```bash
 music play "Working Vibes" kitchen 20 --verbose  # see wake cycle steps
@@ -279,7 +283,22 @@ Claude handles multi-step orchestration — searching the catalog, creating play
 
 Run these commands in a real terminal (not inside Claude Code — TUI requires a TTY). Install `chafa` (`brew install chafa`) for album art in now-playing.
 
-**Now playing** (`music now`) — album art, progress bar, queue, playback controls. Shows `▶`/`⏸` play state and `Shuffle`/`Repeat` indicators. Press `s` for speakers, `v` for volume mixer, `r` for radio — all return to this screen.
+**Now playing** (`music now`) — album art, progress bar, queue, full playback controls. Shows `▶`/`⏸` play state and `Shuffle`/`Repeat` indicators.
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` | Skip track (scroll queue in playlist mode) |
+| `←`/`→` | Seek ±30s |
+| `Space` | Play/pause |
+| `z` | Cycle mode: off → shuffle → repeat all → repeat one → off |
+| `r` | Start radio station from current track |
+| `l` | Love current track (toggles) |
+| `d` | Dislike current track (toggles) |
+| `+`/`-` | Master volume ±5 |
+| `s` | AirPlay speaker picker |
+| `v` | Per-speaker volume mixer |
+| `b`/`Esc` | Back (playlist mode) / Quit |
+| `q` | Quit |
 
 ![Now Playing](media/nowplaying.png)
 

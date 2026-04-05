@@ -20,6 +20,7 @@ struct Play: ParsableCommand {
 
         // Existing flag-based behavior takes priority
         if let playlist = playlist {
+            wakeInheritedSpeakers(backend: backend)
             _ = try syncRun {
                 try await backend.runMusic("""
                     set shuffle enabled to true
@@ -31,6 +32,7 @@ struct Play: ParsableCommand {
         }
 
         if let song = song {
+            wakeInheritedSpeakers(backend: backend)
             let artistFilter = artist.map { " and artist contains \"\($0)\"" } ?? ""
             let result = try syncRun {
                 try await backend.runMusic("""
@@ -55,6 +57,7 @@ struct Play: ParsableCommand {
         if !args.isEmpty {
             // Single integer → play from cache
             if args.count == 1, let index = Int(args[0]) {
+                wakeInheritedSpeakers(backend: backend)
                 let cache = ResultCache()
                 let song = try cache.lookupSong(index: index)
                 let escapedTitle = song.title.replacingOccurrences(of: "\"", with: "\\\"")
@@ -154,6 +157,10 @@ struct Play: ParsableCommand {
                 }
             }
 
+            if matchedSpeaker == nil {
+                wakeInheritedSpeakers(backend: backend)
+            }
+
             if hasShuffle {
                 _ = try syncRun {
                     try await backend.runMusic("set shuffle enabled to true")
@@ -180,10 +187,33 @@ struct Play: ParsableCommand {
         }
 
         // No args → resume
+        wakeInheritedSpeakers(backend: backend)
         _ = try syncRun {
             try await backend.runMusic("play")
         }
         showNowPlaying(json: json, waitForPlay: true)
+    }
+}
+
+/// Wake any non-local AirPlay speakers that are already selected from a previous session.
+private func wakeInheritedSpeakers(backend: AppleScriptBackend) {
+    guard !Music.noWake else { return }
+    guard let devices = try? fetchSpeakerDevices() else { return }
+    let nonLocal = devices.filter {
+        ($0["selected"] as? Bool == true) && ($0["kind"] as? String != "computer")
+    }
+    let names = nonLocal.map { $0["name"] as! String }
+    guard !names.isEmpty else { return }
+    verbose("inherited AirPlay session detected: \(names.joined(separator: ", "))")
+    let results = withStatus("Waking speakers...") {
+        wakeSpeakers(names, backend: backend)
+    }
+    for r in results {
+        if r.verifiedSelected {
+            verbose("woke \(r.name)")
+        } else {
+            verbose("\(r.name): wake verification uncertain")
+        }
     }
 }
 

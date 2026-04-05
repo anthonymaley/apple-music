@@ -338,7 +338,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let queueW = frame.width - queueX - 3
-        let footerText = "\(ANSICode.bold)↑↓\(ANSICode.reset) Queue  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) Pause  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Vol  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)b\(ANSICode.reset) Back  \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.bold)↑↓\(ANSICode.reset) Queue  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) Pause  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)z\(ANSICode.reset) Mode  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)l\(ANSICode.reset) Love  \(ANSICode.bold)d\(ANSICode.reset) Dis  \(ANSICode.bold)b\(ANSICode.reset) Back  \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         let titleText = context != nil ? "Now Playing \u{2014} \(context!.playlistName)" : "Now Playing"
         var out = renderShell(title: titleText, status: "", footer: footerText)
@@ -558,8 +558,33 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
                 }
             case .space:
                 _ = try? syncRun { try await backend.runMusic("playpause") }
+            case .char("z"):
+                _ = try? syncRun {
+                    try await backend.runMusic("""
+                        set sh to shuffle enabled
+                        set rp to song repeat as text
+                        if sh is true then
+                            set shuffle enabled to false
+                            set song repeat to all
+                        else if rp is "all" then
+                            set song repeat to one
+                        else if rp is "one" then
+                            set song repeat to off
+                        else
+                            set shuffle enabled to true
+                        end if
+                    """)
+                }
             case .char("r"):
                 startRadioStation()
+            case .char("l"):
+                _ = try? syncRun { try await backend.runMusic("set loved of current track to not (loved of current track)") }
+            case .char("d"):
+                _ = try? syncRun { try await backend.runMusic("set disliked of current track to not (disliked of current track)") }
+            case .char("+"), .char("="):
+                _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume + 5)") }
+            case .char("-"):
+                _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume - 5)") }
             case .char("s"):
                 // Speaker picker as modal subflow
                 terminal.exitRawMode()
@@ -679,7 +704,7 @@ func runNowPlayingTUI() {
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let queueW = frame.width - queueX - 3
-        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑ ↓\(ANSICode.reset) Skip   \(ANSICode.bold)← →\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)s\(ANSICode.reset) Speakers   \(ANSICode.bold)v\(ANSICode.reset) Volume   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑ ↓\(ANSICode.reset) Skip   \(ANSICode.bold)← →\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) Pause   \(ANSICode.bold)s\(ANSICode.reset) Speakers   \(ANSICode.bold)v\(ANSICode.reset) Mixer   \(ANSICode.bold)+-\(ANSICode.reset) Vol   \(ANSICode.bold)z\(ANSICode.reset) Mode   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)l\(ANSICode.reset) Love   \(ANSICode.bold)d\(ANSICode.reset) Dislike   \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         var out = renderShell(title: "Now Playing", status: "", footer: footerText)
 
@@ -851,8 +876,33 @@ func runNowPlayingTUI() {
                 }
             case .space:
                 _ = try? syncRun { try await backend.runMusic("playpause") }
+            case .char("z"):
+                _ = try? syncRun {
+                    try await backend.runMusic("""
+                        set sh to shuffle enabled
+                        set rp to song repeat as text
+                        if sh is true then
+                            set shuffle enabled to false
+                            set song repeat to all
+                        else if rp is "all" then
+                            set song repeat to one
+                        else if rp is "one" then
+                            set song repeat to off
+                        else
+                            set shuffle enabled to true
+                        end if
+                    """)
+                }
             case .char("r"):
                 startRadioStation()
+            case .char("l"):
+                _ = try? syncRun { try await backend.runMusic("set loved of current track to not (loved of current track)") }
+            case .char("d"):
+                _ = try? syncRun { try await backend.runMusic("set disliked of current track to not (disliked of current track)") }
+            case .char("+"), .char("="):
+                _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume + 5)") }
+            case .char("-"):
+                _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume - 5)") }
             case .char("s"):
                 // Speaker picker as modal subflow
                 terminal.exitRawMode()
