@@ -32,7 +32,7 @@ func renderShell(title: String, status: String, footer: String) -> String {
     let frame = ScreenFrame.current()
     let appX = 3
 
-    var out = ANSICode.cursorHome + ANSICode.clearScreen
+    var out = ANSICode.cursorHome
 
     // App label
     out += ANSICode.moveTo(row: 2, col: appX)

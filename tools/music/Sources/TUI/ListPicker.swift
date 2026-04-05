@@ -72,6 +72,7 @@ func runPlaylistBrowser(
     let terminal = TerminalState.shared
     terminal.enterRawMode()
     defer { terminal.exitRawMode() }
+    print(ANSICode.cursorHome + ANSICode.clearScreen, terminator: "")
 
     var focus: BrowserFocus = savedState?.focus ?? .playlists
     var plCursor = savedState?.plCursor ?? 0
@@ -213,36 +214,30 @@ func runPlaylistBrowser(
                 }
             }
         } else {
+            // Placeholder — tracks not yet loaded for this playlist
             out += ANSICode.moveTo(row: rightRow, col: rightX)
-            out += "\(ANSICode.dim)Loading...\(ANSICode.reset)"
+            out += "\(ANSICode.bold)\(truncText(playlists[plCursor], to: rightW))\(ANSICode.reset)"
+            rightRow += 2
+            out += ANSICode.moveTo(row: rightRow, col: rightX)
+            out += "\(ANSICode.dim)Enter to browse tracks\(ANSICode.reset)"
+            rightRow += 1
+            out += ANSICode.moveTo(row: rightRow, col: rightX)
+            out += "\(ANSICode.dim)p = play \u{00B7} s = shuffle\(ANSICode.reset)"
         }
 
         print(out, terminator: "")
         fflush(stdout)
     }
 
-    // Show list immediately, load preview lazily
-    var previewLoaded = false
-
     // If restoring state, load the preview for the current playlist immediately
     if savedState != nil {
         loadPreview()
-        previewLoaded = true
     }
 
     render()
 
     while true {
-        let key = KeyPress.read(timeout: previewLoaded ? 60.0 : 0.1)
-
-        // Load preview on first idle moment
-        if !previewLoaded && key == nil {
-            loadPreview()
-            previewLoaded = true
-            render()
-            continue
-        }
-
+        let key = KeyPress.read(timeout: 60.0)
         guard let key = key else { continue }
 
         let trackCount = previewCache[plCursor]?.tracks.count ?? 0
@@ -251,12 +246,8 @@ func runPlaylistBrowser(
         case .up:
             if focus == .playlists {
                 plCursor = max(0, plCursor - 1)
-                if previewCache[plCursor] != nil {
-                    loadPreview()
-                } else {
-                    lastLoadedPl = -1
-                    previewLoaded = false
-                }
+                // Show cached preview if available, otherwise right pane shows placeholder
+                if previewCache[plCursor] != nil { loadPreview() }
             } else {
                 trCursor = max(0, trCursor - 1)
             }
@@ -264,18 +255,14 @@ func runPlaylistBrowser(
         case .down:
             if focus == .playlists {
                 plCursor = min(playlists.count - 1, plCursor + 1)
-                if previewCache[plCursor] != nil {
-                    loadPreview()
-                } else {
-                    lastLoadedPl = -1
-                    previewLoaded = false
-                }
+                if previewCache[plCursor] != nil { loadPreview() }
             } else {
                 trCursor = min(trackCount - 1, trCursor + 1)
             }
 
-        case .char("\t"):  // Tab
+        case .char("\t"):  // Tab — activate and switch focus
             if focus == .playlists {
+                loadPreview()
                 focus = .tracks
             } else {
                 focus = .playlists
@@ -283,6 +270,7 @@ func runPlaylistBrowser(
 
         case .enter:
             if focus == .playlists {
+                loadPreview()
                 focus = .tracks
                 trCursor = 0
                 trScroll = 0
