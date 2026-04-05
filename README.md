@@ -283,11 +283,12 @@ Claude handles multi-step orchestration — searching the catalog, creating play
 
 Run these commands in a real terminal (not inside Claude Code — TUI requires a TTY). Install `chafa` (`brew install chafa`) for album art in now-playing.
 
-**Now playing** (`music now`) — album art, progress bar, queue, full playback controls. Shows `▶`/`⏸` play state and `Shuffle`/`Repeat` indicators.
+**Now playing** (`music now`) — 3-column layout: album art, playback metadata, and a timeline pane. The timeline shows real session history (Played) and upcoming tracks (Next). Cursor movement is instant — only the timeline redraws, no polling.
 
 | Key | Action |
 |-----|--------|
-| `↑`/`↓` | Skip track (scroll queue in playlist mode) |
+| `↑`/`↓` | Navigate timeline (instant, no poll) |
+| `Enter` | Play selected track |
 | `←`/`→` | Seek ±30s |
 | `Space` | Play/pause |
 | `z` | Cycle mode: off → shuffle → repeat all → repeat one → off |
@@ -300,9 +301,11 @@ Run these commands in a real terminal (not inside Claude Code — TUI requires a
 | `b`/`Esc` | Back (playlist mode) / Quit |
 | `q` | Quit |
 
+Two markers in the timeline: green `▶` = currently playing, cyan `▸` = cursor position.
+
 ![Now Playing](media/nowplaying.png)
 
-**Playlist browser** (`music playlist`) — 2-pane browser. Left: playlists. Right: scrollable tracks. `Tab` switches panes, `Enter` plays a track and transitions to Now Playing. `b` returns here.
+**Playlist browser** (`music playlist`) — 2-pane browser. Left: playlists (instant highlight on `↑↓`, no fetch). Right: tracks (loaded on `Enter` or `Tab`). `p` plays playlist, `s` shuffles, `b` goes back.
 
 ![Playlist Browser](media/playlist.jog.jpg)
 
