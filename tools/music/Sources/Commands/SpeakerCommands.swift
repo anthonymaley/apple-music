@@ -320,8 +320,7 @@ func resolveSpeakerName(_ input: String, backend: AppleScriptBackend) throws -> 
         return contains
     }
 
-    let available = names.joined(separator: ", ")
-    throw AppleScriptBackend.ScriptError.speakerNotFound("\(input)\" not found. Available: \(available)")
+    throw AppleScriptBackend.ScriptError.speakerNotFound(name: input, available: names)
 }
 
 func listSpeakers(json: Bool) throws {
