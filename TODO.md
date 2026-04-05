@@ -2,41 +2,45 @@
 
 ## Current Session
 
-- [x] Brainstormed AirPlay resilience + CLI polish improvements
-- [x] Wrote design spec with 3-layer architecture (plumbing → resilience → TUI)
-- [x] Spec reviewed: fixed 3 issues (play.md path, verbose/JSON contract, test plan clarity)
-- [x] Wrote 14-task implementation plan
-- [x] Implemented all 14 tasks via subagent-driven development in worktree
-- [x] Spec compliance review: fixed version bump + fetchSpeakerDevices error handling
-- [x] Merged worktree to main, release-built and installed v1.4.0
-- [x] User tested: wake cycle, verbose, speaker not found, routed playback
-- [x] Fixed: added speaker/volume parsing to Swift Play command (music play "X" kitchen 20)
-- [x] Fixed: speakerNotFound error message carried name+available as separate fields
-- [x] Updated README with v1.4.0 features, routed playback, diagnostics, wake cycle
-- [x] Ran /kerd:tend — 7 passing, 2 warnings (gitignore + hooks, unfixed)
+- [x] TUI keybindings: z cycles shuffle/repeat, r radio, l love, d dislike, +/- volume
+- [x] Inherited-session wake detection in Play command (auto-wake non-local AirPlay speakers)
+- [x] v1.5.0 release: keybindings + inherited wake + love/dislike
+- [x] TUI rendering overhaul: 3-column layout, timeline pane, dirty-region rendering
+- [x] Timeline redesign: Played (real session history) + Next (upcoming only)
+- [x] Two-marker system: green ▶ = playing, cyan ▸ = cursor
+- [x] Cursor movement instant (no AppleScript poll, timeline-only redraw)
+- [x] Remove screen clear flicker (overwrite in place)
+- [x] Playlist browser: highlight-only on ↑↓, explicit Enter/Tab to load tracks
+- [x] Fix playlist name quoting (Bluecoats "Lucy" hang)
+- [x] Standalone TUI: cursor navigation with Enter to play
+- [x] Sync standalone TUI timeline with context-aware design
+- [x] v1.6.1 release: rendering overhaul + playlist browser + bug fixes
+- [x] Update skill with routed playback, wake, TUI controls
 
 ## What's Next
 
-- TUI keybinding: `f` to cycle shuffle on/off, `r` to cycle repeat off→all→one (user requested)
+- Clean up worktree branch `worktree-airplay-resilience`
 - Fix /kerd:tend warnings: add kivna/input/ and kivna/output/ to .gitignore, register hooks
-- Inherited-session wake detection in Swift Play command (auto-wake when non-local AirPlay active)
-- Consider `--no-wake` pass-through in commands/play.md slash command
-- End-to-end testing: playlist with comma in name, overlapping speaker names, 200+ track playlist
-- Monitor community feedback on v1.4.0
+- End-to-end edge case testing: comma in playlist name, overlapping speakers, 200+ tracks
+- TUI: progress-only redraw on poll tick (Phase 2 dirty regions)
+- TUI: row-only redraw on cursor move (micro-optimization)
+- TUI: deferred preview in playlist browser (300-500ms idle fetch)
+- Consider: playlist browser sorting (alphabetical option)
+- Monitor community feedback on v1.6.1
 
 ## Key Context
 
-- Version is 1.4.0 everywhere (plugin.json, marketplace.json x2, CLI, Music.swift)
+- Version is 1.6.1 everywhere (plugin.json, marketplace.json x2, CLI, Music.swift)
 - CLI binary is `music`, installed at `~/.local/bin/music`
-- **Wake cycle**: deselect→500ms→reselect→500ms→verify. Runs automatically on routed playback.
-- **Routed playback**: `music play "Playlist" kitchen 20` now works directly from CLI (longest-match speaker parsing)
-- **--verbose**: diagnostics to stderr, works alongside --json
-- **--no-wake**: skips wake cycle on Play command
-- **Play command flag**: `@Flag var verboseFlag` (not `verbose`) to avoid shadowing the global `verbose()` function
-- **speakerNotFound**: carries `(name: String, available: [String])` not a single string
-- **Worktree branch** `worktree-airplay-resilience` still exists at `.claude/worktrees/airplay-resilience` — can be cleaned up
+- **Must codesign after cp**: `codesign -f --sign - ~/.local/bin/music` — macOS kills unsigned binaries
+- **renderShell no longer clears screen** — clear only happens once at TUI startup
+- **Dirty regions**: cursor ↑↓ calls refreshTimelineOnly() + continue, skips poll entirely
+- **Real history only**: Played section uses in-memory history array, not playlist index position
+- **Playlist name escaping**: double quotes in names escaped with `replacingOccurrences(of: "\"", with: "\\\"")`
 - **2-screen flow**: PlaylistBrowser ↔ NowPlaying with PlaybackContext. b/Esc returns to browser with state preserved
 - **Speaker matching**: longest match wins (avoids "Office" matching before "Julie office")
+- **Wake cycle**: deselect→500ms→reselect→500ms→verify. Inherited-session wake auto-detects non-local speakers.
+- **SourceKit false positives**: cross-file symbol warnings are noise. Build compiles clean.
 
 ## Backlog
 
