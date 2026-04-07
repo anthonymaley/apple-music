@@ -128,28 +128,21 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
         }
 
     case .wake(let name):
-        let targetNames: [String]
         if let name = name {
+            // Wake a specific speaker: select it, then reset to establish a clean connection
             let resolved = try resolveSpeakerName(name, backend: backend)
-            targetNames = [resolved]
-        } else {
-            let devices = try fetchSpeakerDevices()
-            targetNames = devices.filter { $0["selected"] as? Bool == true }.map { $0["name"] as! String }
-            if targetNames.isEmpty {
-                print("No active speakers to wake.")
-                return
+            _ = try syncRun {
+                try await backend.runMusic("set selected of AirPlay device \"\(resolved)\" to true")
             }
         }
-
-        let results = withStatus("Waking speakers...") {
-            wakeSpeakers(targetNames, backend: backend)
+        let reset = withStatus("Resetting AirPlay speakers...") {
+            resetAirPlaySpeakers(backend: backend)
         }
-
-        for r in results {
-            if r.verifiedSelected {
-                print("Woke \(r.name).")
-            } else {
-                print("\(r.name): wake cycle completed but verification uncertain.")
+        if reset.isEmpty {
+            print("No active AirPlay speakers to reset.")
+        } else {
+            for s in reset {
+                print("Reset \(s.name) [\(s.volume)].")
             }
         }
     }
@@ -224,75 +217,79 @@ func fetchSpeakerDevices() throws -> [[String: Any]] {
     }
 }
 
-// MARK: - Wake cycle
+// MARK: - AirPlay speaker reset
 
-struct WakeResult {
+struct SpeakerSnapshot {
     let name: String
-    let deselectSucceeded: Bool
-    let reselectSucceeded: Bool
-    let verifiedSelected: Bool
+    let volume: Int
 }
 
-func wakeSpeakers(_ names: [String], backend: AppleScriptBackend) -> [WakeResult] {
-    var results: [WakeResult] = []
+/// Reset all active non-local AirPlay speakers: deselect → wait → reselect → restore volumes.
+/// Clears ghost connections by forcing the AirPlay stack to fully tear down and rebuild sessions.
+/// Returns the speakers that were reset, empty if none needed resetting.
+@discardableResult
+func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
+    guard !Music.noWake else { return [] }
+    guard let devices = try? fetchSpeakerDevices() else {
+        verbose("reset: fetchSpeakerDevices failed, skipping")
+        return []
+    }
+    let nonLocal = devices.filter {
+        ($0["selected"] as? Bool == true) && ($0["kind"] as? String != "computer")
+    }
+    guard !nonLocal.isEmpty else { return [] }
 
-    for name in names {
-        verbose("deselecting \(name)...")
-        let deselectOk: Bool
+    let speakers = nonLocal.map {
+        SpeakerSnapshot(name: $0["name"] as! String, volume: $0["volume"] as! Int)
+    }
+    verbose("resetting AirPlay: \(speakers.map { "\($0.name) [\($0.volume)]" }.joined(separator: ", "))")
+
+    // Deselect all
+    for s in speakers {
+        verbose("deselecting \(s.name)...")
         do {
             _ = try syncRun {
-                try await backend.runMusic("set selected of AirPlay device \"\(name)\" to false")
+                try await backend.runMusic("set selected of AirPlay device \"\(s.name)\" to false")
             }
-            deselectOk = true
         } catch {
-            verbose("deselect failed for \(name): \(error.localizedDescription)")
-            deselectOk = false
+            verbose("deselect failed for \(s.name): \(error.localizedDescription)")
         }
-        results.append(WakeResult(name: name, deselectSucceeded: deselectOk, reselectSucceeded: false, verifiedSelected: false))
     }
 
-    // Wait for AirPlay stack to release
-    verbose("waiting 500ms for AirPlay release...")
-    Thread.sleep(forTimeInterval: 0.5)
+    // Wait for AirPlay stack to fully tear down stale sessions.
+    // HomePods need 1-2s after idle/sleep; 1.5s matches human toggle speed.
+    verbose("waiting 1.5s for AirPlay teardown...")
+    Thread.sleep(forTimeInterval: 1.5)
 
-    for i in results.indices {
-        let name = results[i].name
-        verbose("reselecting \(name)...")
-        let reselectOk: Bool
+    // Reselect all
+    for s in speakers {
+        verbose("reselecting \(s.name)...")
         do {
             _ = try syncRun {
-                try await backend.runMusic("set selected of AirPlay device \"\(name)\" to true")
+                try await backend.runMusic("set selected of AirPlay device \"\(s.name)\" to true")
             }
-            reselectOk = true
         } catch {
-            verbose("reselect failed for \(name): \(error.localizedDescription)")
-            reselectOk = false
+            verbose("reselect failed for \(s.name): \(error.localizedDescription)")
         }
-        results[i] = WakeResult(name: name, deselectSucceeded: results[i].deselectSucceeded, reselectSucceeded: reselectOk, verifiedSelected: false)
     }
 
-    // Wait for AirPlay stack to reconnect
-    verbose("waiting 500ms for AirPlay reconnect...")
-    Thread.sleep(forTimeInterval: 0.5)
-
-    // Verify selection state
-    for i in results.indices {
-        let name = results[i].name
-        let verified: Bool
+    // Restore per-speaker volumes (deselect can reset to default)
+    for s in speakers {
         do {
-            let state = try syncRun {
-                try await backend.runMusic("get selected of AirPlay device \"\(name)\"")
+            _ = try syncRun {
+                try await backend.runMusic("set sound volume of AirPlay device \"\(s.name)\" to \(s.volume)")
             }
-            verified = state.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
-            verbose("\(name) verified selected: \(verified)")
         } catch {
-            verbose("verification failed for \(name): \(error.localizedDescription)")
-            verified = false
+            verbose("volume restore failed for \(s.name): \(error.localizedDescription)")
         }
-        results[i] = WakeResult(name: name, deselectSucceeded: results[i].deselectSucceeded, reselectSucceeded: results[i].reselectSucceeded, verifiedSelected: verified)
     }
 
-    return results
+    // Wait for AirPlay to establish new audio streams
+    verbose("waiting 1.5s for AirPlay reconnect...")
+    Thread.sleep(forTimeInterval: 1.5)
+
+    verbose("reset complete: \(speakers.map { $0.name }.joined(separator: ", "))")
+    return speakers
 }
 
 // MARK: - Speaker name resolution (case-insensitive prefix match)

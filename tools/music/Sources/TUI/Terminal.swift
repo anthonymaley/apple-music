@@ -16,6 +16,7 @@ struct ANSICode {
     static let dim = "\u{1B}[2m"
     static let reset = "\u{1B}[0m"
     static let inverse = "\u{1B}[7m"
+    static let red = "\u{1B}[31m"
     static let green = "\u{1B}[32m"
     static let cyan = "\u{1B}[36m"
     static let yellow = "\u{1B}[33m"

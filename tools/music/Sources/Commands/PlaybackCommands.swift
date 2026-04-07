@@ -20,7 +20,6 @@ struct Play: ParsableCommand {
 
         // Existing flag-based behavior takes priority
         if let playlist = playlist {
-            wakeInheritedSpeakers(backend: backend)
             _ = try syncRun {
                 try await backend.runMusic("""
                     set shuffle enabled to true
@@ -32,7 +31,6 @@ struct Play: ParsableCommand {
         }
 
         if let song = song {
-            wakeInheritedSpeakers(backend: backend)
             let artistFilter = artist.map { " and artist contains \"\($0)\"" } ?? ""
             let result = try syncRun {
                 try await backend.runMusic("""
@@ -57,7 +55,6 @@ struct Play: ParsableCommand {
         if !args.isEmpty {
             // Single integer → play from cache
             if args.count == 1, let index = Int(args[0]) {
-                wakeInheritedSpeakers(backend: backend)
                 let cache = ResultCache()
                 let song = try cache.lookupSong(index: index)
                 let escapedTitle = song.title.replacingOccurrences(of: "\"", with: "\\\"")
@@ -130,23 +127,10 @@ struct Play: ParsableCommand {
                 playlistName = remaining.joined(separator: " ")
             }
 
-            // Route to speaker with wake cycle
+            // Route to speaker without forcing a full AirPlay reset.
             if let speaker = matchedSpeaker {
-                if !Music.noWake {
-                    let results = withStatus("Waking speakers...") {
-                        wakeSpeakers([speaker], backend: backend)
-                    }
-                    for r in results {
-                        if r.verifiedSelected {
-                            print("Woke \(r.name).")
-                        } else {
-                            print("\(r.name): wake cycle completed but verification uncertain.")
-                        }
-                    }
-                } else {
-                    _ = try syncRun {
-                        try await backend.runMusic("set selected of AirPlay device \"\(speaker)\" to true")
-                    }
+                _ = try syncRun {
+                    try await backend.runMusic("set selected of AirPlay device \"\(speaker)\" to true")
                 }
                 // Set volume if specified
                 if let vol = speakerVolume {
@@ -157,10 +141,6 @@ struct Play: ParsableCommand {
                 }
             }
 
-            if matchedSpeaker == nil {
-                wakeInheritedSpeakers(backend: backend)
-            }
-
             if hasShuffle {
                 _ = try syncRun {
                     try await backend.runMusic("set shuffle enabled to true")
@@ -168,8 +148,30 @@ struct Play: ParsableCommand {
             }
 
             if !playlistName.isEmpty {
-                _ = try syncRun {
-                    try await backend.runMusic("play playlist \"\(playlistName)\"")
+                let escapedQuery = playlistName.replacingOccurrences(of: "\"", with: "\\\"")
+                let result = try syncRun {
+                    try await backend.runMusic("""
+                        try
+                            play playlist "\(escapedQuery)"
+                            return "PLAYLIST"
+                        on error
+                            set albumMatches to (every track of playlist "Library" whose album contains "\(escapedQuery)")
+                            if (count of albumMatches) > 0 then
+                                play item 1 of albumMatches
+                                return "ALBUM"
+                            end if
+                            set songMatches to (every track of playlist "Library" whose name contains "\(escapedQuery)")
+                            if (count of songMatches) > 0 then
+                                play item 1 of songMatches
+                                return "SONG"
+                            end if
+                            return "NOT_FOUND"
+                        end try
+                    """)
+                }
+                if result.trimmingCharacters(in: .whitespacesAndNewlines) == "NOT_FOUND" {
+                    print("No playlist, album, or song found matching '\(playlistName)'")
+                    throw ExitCode.failure
                 }
             } else if matchedSpeaker != nil {
                 // Speaker routed but no playlist specified — just resume
@@ -187,7 +189,6 @@ struct Play: ParsableCommand {
         }
 
         // No args → resume
-        wakeInheritedSpeakers(backend: backend)
         _ = try syncRun {
             try await backend.runMusic("play")
         }
@@ -195,27 +196,6 @@ struct Play: ParsableCommand {
     }
 }
 
-/// Wake any non-local AirPlay speakers that are already selected from a previous session.
-private func wakeInheritedSpeakers(backend: AppleScriptBackend) {
-    guard !Music.noWake else { return }
-    guard let devices = try? fetchSpeakerDevices() else { return }
-    let nonLocal = devices.filter {
-        ($0["selected"] as? Bool == true) && ($0["kind"] as? String != "computer")
-    }
-    let names = nonLocal.map { $0["name"] as! String }
-    guard !names.isEmpty else { return }
-    verbose("inherited AirPlay session detected: \(names.joined(separator: ", "))")
-    let results = withStatus("Waking speakers...") {
-        wakeSpeakers(names, backend: backend)
-    }
-    for r in results {
-        if r.verifiedSelected {
-            verbose("woke \(r.name)")
-        } else {
-            verbose("\(r.name): wake verification uncertain")
-        }
-    }
-}
 
 struct Pause: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Pause playback.")

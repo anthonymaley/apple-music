@@ -15,6 +15,8 @@ struct NowPlayingState {
     var speakers: [(name: String, volume: Int)] = []
     var shuffleEnabled: Bool = false
     var repeatMode: String = "off"
+    var loved: Bool = false
+    var disliked: Bool = false
 }
 
 struct TrackListEntry {
@@ -46,7 +48,13 @@ func pollNowPlaying() -> NowPlayingState? {
                 end repeat
                 set sh to shuffle enabled
                 set rp to song repeat as text
-                return t & "|" & a & "|" & al & "|" & (round d) & "|" & (round p) & "|" & state & "|" & spk & "|" & sh & "|" & rp
+                set lv to false
+                set dl to false
+                try
+                    set lv to loved of current track
+                    set dl to disliked of current track
+                end try
+                return t & "|" & a & "|" & al & "|" & (round d) & "|" & (round p) & "|" & state & "|" & spk & "|" & sh & "|" & rp & "|" & lv & "|" & dl
             end try
             return "STOPPED"
         """)
@@ -54,7 +62,7 @@ func pollNowPlaying() -> NowPlayingState? {
 
     let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed == "STOPPED" { return nil }
-    let parts = trimmed.split(separator: "|", maxSplits: 8).map(String.init)
+    let parts = trimmed.split(separator: "|", maxSplits: 10).map(String.init)
     guard parts.count >= 7 else { return nil }
 
     let speakers = parts[6].split(separator: ",").map { pair -> (name: String, volume: Int) in
@@ -64,12 +72,15 @@ func pollNowPlaying() -> NowPlayingState? {
 
     let shuffleEnabled = parts.count > 7 && parts[7].trimmingCharacters(in: .whitespaces) == "true"
     let repeatMode = parts.count > 8 ? parts[8].trimmingCharacters(in: .whitespaces) : "off"
+    let loved = parts.count > 9 && parts[9].trimmingCharacters(in: .whitespaces) == "true"
+    let disliked = parts.count > 10 && parts[10].trimmingCharacters(in: .whitespaces) == "true"
 
     return NowPlayingState(
         track: parts[0], artist: parts[1], album: parts[2],
         duration: Int(parts[3]) ?? 0, position: Int(parts[4]) ?? 0,
         state: parts[5], speakers: speakers,
-        shuffleEnabled: shuffleEnabled, repeatMode: repeatMode
+        shuffleEnabled: shuffleEnabled, repeatMode: repeatMode,
+        loved: loved, disliked: disliked
     )
 }
 
@@ -112,6 +123,98 @@ func pollSurroundingTracks() -> [TrackListEntry] {
         guard parts.count >= 3, let idx = Int(parts[0]) else { return nil }
         return TrackListEntry(index: idx, name: parts[1], artist: parts[2], isCurrent: isCurrent)
     }
+}
+
+func pollAlbumTracks(for np: NowPlayingState) -> [TrackListEntry] {
+    let album = np.album.replacingOccurrences(of: "\"", with: "\\\"")
+    let artist = np.artist.replacingOccurrences(of: "\"", with: "\\\"")
+    let currentTitle = np.track
+    let currentArtist = np.artist
+    let backend = AppleScriptBackend()
+
+    guard !album.isEmpty, let result = try? syncRun({
+        try await backend.runMusic("""
+            try
+                set currentDisc to 0
+                try
+                    set currentDisc to disc number of current track
+                end try
+                set matches to {}
+                if currentDisc is not 0 then
+                    set matches to (every track of playlist "Library" whose album is "\(album)" and artist contains "\(artist)" and disc number is currentDisc)
+                end if
+                if (count of matches) = 0 then
+                    set matches to (every track of playlist "Library" whose album is "\(album)" and artist contains "\(artist)")
+                end if
+                if (count of matches) = 0 then
+                    set matches to (every track of playlist "Library" whose album is "\(album)")
+                end if
+                set output to ""
+                repeat with t in matches
+                    if output is not "" then set output to output & linefeed
+                    set tn to 0
+                    try
+                        set tn to track number of t
+                    end try
+                    set output to output & tn & "|" & name of t & "|" & artist of t
+                end repeat
+                return output
+            end try
+            return ""
+        """)
+    }) else { return pollSurroundingTracks() }
+
+    let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return pollSurroundingTracks() }
+
+    let sorted: [TrackListEntry] = trimmed.components(separatedBy: "\n").compactMap { line -> TrackListEntry? in
+        let parts = line.split(separator: "|", maxSplits: 2).map(String.init)
+        guard parts.count >= 3 else { return nil }
+        let idx = Int(parts[0]) ?? 0
+        let name = parts[1]
+        let artist = parts[2]
+        return TrackListEntry(
+            index: idx,
+            name: name,
+            artist: artist,
+            isCurrent: name == currentTitle && artist == currentArtist
+        )
+    }
+    .sorted {
+        if $0.index == $1.index { return $0.name < $1.name }
+        if $0.index == 0 { return false }
+        if $1.index == 0 { return true }
+        return $0.index < $1.index
+    }
+
+    var seen: Set<String> = []
+    var deduped: [TrackListEntry] = []
+    for entry in sorted {
+        let key = trackKey(title: entry.name, artist: entry.artist)
+        guard !seen.contains(key) else { continue }
+        seen.insert(key)
+        deduped.append(entry)
+    }
+
+    return deduped.enumerated().map { offset, entry in
+        TrackListEntry(
+            index: offset + 1,
+            name: entry.name,
+            artist: entry.artist,
+            isCurrent: entry.isCurrent
+        )
+    }
+}
+
+func clearBlock(x: Int, y: Int, width: Int, height: Int) -> String {
+    guard width > 0, height > 0 else { return "" }
+    var out = ""
+    let blank = String(repeating: " ", count: width)
+    for row in y..<(y + height) {
+        out += ANSICode.moveTo(row: row, col: x)
+        out += blank
+    }
+    return out
 }
 
 func extractArtwork() -> String? {
@@ -297,6 +400,267 @@ enum NowPlayingResult {
     case quit   // user pressed q
 }
 
+enum RightPaneMode {
+    case playlist
+    case queue
+}
+
+enum TimelineRowKind {
+    case playlist
+    case history
+    case queue
+}
+
+struct TimelineRow {
+    let id: String
+    let kind: TimelineRowKind
+    let index: Int?
+    let title: String
+    let artist: String
+    let label: String
+    let isCurrent: Bool
+    let wasPlayed: Bool
+    let isReplayable: Bool
+}
+
+func splitTrackLine(_ line: String) -> (title: String, artist: String) {
+    let parts = line.split(separator: "\u{2014}", maxSplits: 1).map {
+        $0.trimmingCharacters(in: .whitespaces)
+    }
+    let title = parts.first.map { String($0) } ?? line
+    let artist = parts.count > 1 ? String(parts[1]) : ""
+    return (title, artist)
+}
+
+func trackKey(title: String, artist: String) -> String {
+    "\(title)\u{0}\(artist)"
+}
+
+func buildPlaylistRows(
+    contextTracks: [String],
+    history: [(track: String, artist: String)],
+    currentIndex: Int?
+) -> [TimelineRow] {
+    let played = Set(history.map { trackKey(title: $0.track, artist: $0.artist) })
+    return contextTracks.enumerated().map { i, line in
+        let parsed = splitTrackLine(line)
+        return TimelineRow(
+            id: trackKey(title: parsed.title, artist: parsed.artist),
+            kind: .playlist,
+            index: i + 1,
+            title: parsed.title,
+            artist: parsed.artist,
+            label: line,
+            isCurrent: i == currentIndex,
+            wasPlayed: played.contains(trackKey(title: parsed.title, artist: parsed.artist)),
+            isReplayable: true
+        )
+    }
+}
+
+func buildContextQueueRows(
+    contextTracks: [String],
+    history: [(track: String, artist: String)],
+    currentIndex: Int?
+) -> [TimelineRow] {
+    var rows: [TimelineRow] = history.map { item in
+        TimelineRow(
+            id: trackKey(title: item.track, artist: item.artist),
+            kind: .history,
+            index: nil,
+            title: item.track,
+            artist: item.artist,
+            label: "\(item.track) \u{2014} \(item.artist)",
+            isCurrent: false,
+            wasPlayed: true,
+            isReplayable: true
+        )
+    }
+
+    if let currentIndex, currentIndex >= 0, currentIndex < contextTracks.count {
+        let currentLine = contextTracks[currentIndex]
+        let parsed = splitTrackLine(currentLine)
+        rows.append(
+            TimelineRow(
+                id: trackKey(title: parsed.title, artist: parsed.artist),
+                kind: .queue,
+                index: currentIndex + 1,
+                title: parsed.title,
+                artist: parsed.artist,
+                label: currentLine,
+                isCurrent: true,
+                wasPlayed: false,
+                isReplayable: true
+            )
+        )
+
+        if currentIndex + 1 < contextTracks.count {
+            rows.append(
+                contentsOf: contextTracks[(currentIndex + 1)...].enumerated().map { offset, line in
+                    let idx = currentIndex + 1 + offset
+                    let parsed = splitTrackLine(line)
+                    return TimelineRow(
+                        id: trackKey(title: parsed.title, artist: parsed.artist),
+                        kind: .queue,
+                        index: idx + 1,
+                        title: parsed.title,
+                        artist: parsed.artist,
+                        label: line,
+                        isCurrent: false,
+                        wasPlayed: false,
+                        isReplayable: true
+                    )
+                }
+            )
+        }
+    }
+
+    return rows
+}
+
+func buildHistoryRows(history: [(track: String, artist: String)]) -> [TimelineRow] {
+    history.map { item in
+        TimelineRow(
+            id: trackKey(title: item.track, artist: item.artist),
+            kind: .history,
+            index: nil,
+            title: item.track,
+            artist: item.artist,
+            label: "\(item.track) \u{2014} \(item.artist)",
+            isCurrent: false,
+            wasPlayed: true,
+            isReplayable: true
+        )
+    }
+}
+
+func buildStandaloneRows(
+    history: [(track: String, artist: String)],
+    surrounding: [TrackListEntry]
+) -> [TimelineRow] {
+    var rows: [TimelineRow] = []
+    let surroundingKeys = Set(surrounding.map { trackKey(title: $0.name, artist: $0.artist) })
+
+    for item in history.reversed() {
+        let key = trackKey(title: item.track, artist: item.artist)
+        guard !surroundingKeys.contains(key) else { continue }
+        rows.append(
+            TimelineRow(
+                id: key,
+                kind: .history,
+                index: nil,
+                title: item.track,
+                artist: item.artist,
+                label: "\(item.track) — \(item.artist)",
+                isCurrent: false,
+                wasPlayed: true,
+                isReplayable: true
+            )
+        )
+    }
+
+    guard let currentPos = surrounding.firstIndex(where: { $0.isCurrent }) else {
+        return rows
+    }
+
+    rows.append(contentsOf: surrounding.enumerated().map { offset, entry in
+        TimelineRow(
+            id: trackKey(title: entry.name, artist: entry.artist),
+            kind: .queue,
+            index: entry.index,
+            title: entry.name,
+            artist: entry.artist,
+            label: "\(entry.name) — \(entry.artist)",
+            isCurrent: entry.isCurrent,
+            wasPlayed: offset < currentPos,
+            isReplayable: true
+        )
+    })
+
+    return rows
+}
+
+func playTrackInPlaylist(backend: AppleScriptBackend, playlistName: String, index: Int) {
+    let escapedPlaylist = playlistName.replacingOccurrences(of: "\"", with: "\\\"")
+    _ = try? syncRun {
+        try await backend.runMusic("play track \(index) of playlist \"\(escapedPlaylist)\"")
+    }
+}
+
+func playTrackInCurrentPlaylist(backend: AppleScriptBackend, index: Int) {
+    _ = try? syncRun {
+        try await backend.runMusic("play track \(index) of current playlist")
+    }
+}
+
+func playLibraryTrack(backend: AppleScriptBackend, title: String, artist: String) {
+    let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+    let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
+    _ = try? syncRun {
+        try await backend.runMusic("""
+            set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
+            if (count of results) = 0 then
+                set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
+            end if
+            if (count of results) > 0 then play item 1 of results
+        """)
+    }
+}
+
+func renderTimelineRows(
+    rows: [TimelineRow],
+    header: String,
+    x: Int,
+    y: Int,
+    width: Int,
+    visibleHeight: Int,
+    cursorIndex: Int,
+    scrollOffset: inout Int
+) -> String {
+    var out = ""
+    var tRow = y
+
+    out += ANSICode.moveTo(row: tRow, col: x)
+    out += "\(ANSICode.bold)\(ANSICode.cyan)\(header)\(ANSICode.reset)"
+    tRow += 1
+    out += ANSICode.moveTo(row: tRow, col: x)
+    out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: min(8, max(1, header.count))))\(ANSICode.reset)"
+    tRow += 2
+
+    let rowHeight = max(1, visibleHeight - 3)
+    guard !rows.isEmpty else { return out }
+
+    let clampedCursor = max(0, min(rows.count - 1, cursorIndex))
+    if clampedCursor < scrollOffset { scrollOffset = clampedCursor }
+    if clampedCursor >= scrollOffset + rowHeight { scrollOffset = clampedCursor - rowHeight + 1 }
+
+    let end = min(rows.count, scrollOffset + rowHeight)
+    for rowIndex in scrollOffset..<end {
+        let row = rows[rowIndex]
+        let isCursor = rowIndex == clampedCursor
+        let indexText = row.index.map { String(format: "%02d", $0) } ?? "  "
+        let rowText = truncText(row.label, to: width - 8)
+
+        out += ANSICode.moveTo(row: tRow, col: x)
+        if row.isCurrent && isCursor {
+            out += " \(ANSICode.cyan)\u{25B8}\(ANSICode.reset)\(ANSICode.green)\u{25B6}\(ANSICode.reset) \(indexText)  \(ANSICode.bold)\(rowText)\(ANSICode.reset)"
+        } else if row.isCurrent {
+            out += "  \(ANSICode.green)\u{25B6}\(ANSICode.reset) \(indexText)  \(ANSICode.bold)\(rowText)\(ANSICode.reset)"
+        } else if isCursor && row.wasPlayed {
+            out += " \(ANSICode.cyan)\u{25B8}\(ANSICode.reset) \(ANSICode.dim)\(indexText)  \(rowText)\(ANSICode.reset)"
+        } else if isCursor {
+            out += " \(ANSICode.cyan)\u{25B8}\(ANSICode.reset) \(indexText)  \(rowText)"
+        } else if row.wasPlayed {
+            out += "\(ANSICode.dim)   \(indexText)  \(rowText)\(ANSICode.reset)"
+        } else {
+            out += "   \(indexText)  \(rowText)"
+        }
+        tRow += 1
+    }
+
+    return out
+}
+
 // MARK: - Context-aware Now Playing (used from playlist browser)
 
 func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
@@ -319,10 +683,11 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     var lastTrackName = ""
     var lastArtistName = ""
     var lastCurrentIdx: Int? = nil
+    var lastShuffleEnabled = false
+    var stoppedPolls = 0
     var history: [(track: String, artist: String)] = []
     var queueCursor = context?.startIndex ?? 0
     var queueScroll = 0
-
     // Build queue entries from context
     let contextTracks: [String] = context?.tracks ?? []
 
@@ -341,11 +706,12 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let timelineW = frame.width - timelineX - 3
-        let footerText = "\(ANSICode.bold)↑↓\(ANSICode.reset) Queue  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}  \(ANSICode.bold)z\(ANSICode.reset) Mode  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)l\(ANSICode.reset) Love  \(ANSICode.bold)d\(ANSICode.reset) Dis  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)b\(ANSICode.reset) Back  \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.bold)↑↓\(ANSICode.reset) Playlist  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)p/n\(ANSICode.reset) Skip  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}  \(ANSICode.bold)z\(ANSICode.reset) Shuffle  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)b\(ANSICode.reset) Back  \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         let titleText = context != nil ? "\u{266B} Now Playing \u{2014} \(context!.playlistName)" : "\u{266B} Now Playing"
         var out = renderShell(title: titleText, status: "", footer: footerText)
-
+        out += ANSICode.moveTo(row: frame.bodyY + 2, col: 1)
+        out += String(repeating: " ", count: frame.width)
         // --- Cover art ---
         let artSize = min(artW, 26, frame.statusY - artY - 2)
         for i in 0..<artSize {
@@ -357,12 +723,20 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
 
         // --- Metadata ---
         let playIcon = np.state == "playing" ? "\u{25B6}" : "\u{23F8}"
+        let ratingIcon = np.loved ? " \(ANSICode.red)\u{2665}\(ANSICode.reset)\(ANSICode.bold)" : np.disliked ? " \(ANSICode.dim)\u{2193}\(ANSICode.reset)\(ANSICode.bold)" : ""
+        let titlePrefixLen = np.loved || np.disliked ? 4 : 2
         out += ANSICode.moveTo(row: metaY, col: metaX)
-        out += "\(ANSICode.bold)\(playIcon) \(truncText(np.track, to: metaW - 2))\(ANSICode.reset)"
+        out += String(repeating: " ", count: metaW + 4)
+        out += ANSICode.moveTo(row: metaY, col: metaX)
+        out += "\(ANSICode.bold)\(playIcon)\(ratingIcon) \(truncText(np.track, to: metaW - titlePrefixLen))\(ANSICode.reset)"
 
+        out += ANSICode.moveTo(row: metaY + 2, col: metaX)
+        out += String(repeating: " ", count: metaW + 4)
         out += ANSICode.moveTo(row: metaY + 2, col: metaX)
         out += truncText(np.artist, to: metaW)
 
+        out += ANSICode.moveTo(row: metaY + 4, col: metaX)
+        out += String(repeating: " ", count: metaW + 4)
         out += ANSICode.moveTo(row: metaY + 4, col: metaX)
         out += "\(ANSICode.dim)\(truncText(np.album, to: metaW))\(ANSICode.reset)"
 
@@ -408,114 +782,28 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
         if np.shuffleEnabled { modeStr += "Shuffle" }
         if np.repeatMode == "one" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat One" }
         else if np.repeatMode == "all" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat" }
+        let modeRow = np.speakers.isEmpty ? metaY + 12 : metaY + 18
+        out += ANSICode.moveTo(row: modeRow, col: metaX)
+        out += String(repeating: " ", count: metaW + 4)
         if !modeStr.isEmpty {
-            let modeRow = np.speakers.isEmpty ? metaY + 12 : metaY + 18
             out += ANSICode.moveTo(row: modeRow, col: metaX)
             out += "\(ANSICode.dim)\(modeStr)\(ANSICode.reset)"
         }
 
         // --- Timeline pane ---
         if timelineW >= 24 {
-            var tRow = metaY
-
-            // Pane header
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.bold)\(ANSICode.cyan)Timeline\(ANSICode.reset)"
-            tRow += 1
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 8))\(ANSICode.reset)"
-            tRow += 2
-
-            // Played section — real session history only
-            if !history.isEmpty {
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                out += "\(ANSICode.dim)Played\(ANSICode.reset)"
-                tRow += 1
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 6))\(ANSICode.reset)"
-                tRow += 1
-                for h in history.prefix(3).reversed() {
-                    out += ANSICode.moveTo(row: tRow, col: timelineX)
-                    let text = truncText("\(h.track) \u{2014} \(h.artist)", to: timelineW - 4)
-                    out += "\(ANSICode.dim)  \(text)\(ANSICode.reset)"
-                    tRow += 1
-                }
-                tRow += 1
-            }
-
-            if !contextTracks.isEmpty {
-                let currentIdx = findCurrentTrackIndex(np: np)
-                let startFrom = (currentIdx ?? -1) + 1  // skip current track
-
-                if startFrom < contextTracks.count {
-                    // Next header
-                    out += ANSICode.moveTo(row: tRow, col: timelineX)
-                    out += "\(ANSICode.bold)\(ANSICode.cyan)Next\(ANSICode.reset)"
-                    tRow += 1
-                    out += ANSICode.moveTo(row: tRow, col: timelineX)
-                    out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 4))\(ANSICode.reset)"
-                    tRow += 1
-
-                    let trackRows = max(1, frame.statusY - tRow - 2)
-
-                    if queueCursor < startFrom { queueCursor = startFrom }
-                    if queueScroll < startFrom { queueScroll = startFrom }
-                    if queueCursor < queueScroll { queueScroll = queueCursor }
-                    if queueCursor >= queueScroll + trackRows { queueScroll = queueCursor - trackRows + 1 }
-
-                    let qEnd = min(contextTracks.count, queueScroll + trackRows)
-                    for i in queueScroll..<qEnd {
-                        out += ANSICode.moveTo(row: tRow, col: timelineX)
-                        let idx = String(format: "%02d", i + 1)
-                        let rowText = truncText(contextTracks[i], to: timelineW - 8)
-                        let isCursor = (i == queueCursor)
-
-                        if isCursor {
-                            out += " \(ANSICode.cyan)\u{25B8}\(ANSICode.reset) \(idx)  \(rowText)"
-                        } else {
-                            out += "\(ANSICode.dim)   \(idx)  \(rowText)\(ANSICode.reset)"
-                        }
-                        tRow += 1
-                    }
-                }
-            } else {
-                // No context — surrounding tracks
-                let surroundingTracks = pollSurroundingTracks()
-                let maxVisible = min(12, frame.statusY - tRow - 2 - 4)
-
-                // Now + Next from surrounding
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                out += "\(ANSICode.bold)Now\(ANSICode.reset)"
-                tRow += 1
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 3))\(ANSICode.reset)"
-                tRow += 1
-                var pastCurrent = false
-                var showedNext = false
-                for (ti, entry) in surroundingTracks.prefix(maxVisible).enumerated() {
-                    if entry.isCurrent { pastCurrent = true }
-                    else if pastCurrent && !showedNext {
-                        out += ANSICode.moveTo(row: tRow, col: timelineX)
-                        out += "\(ANSICode.bold)\(ANSICode.cyan)Next\(ANSICode.reset)"
-                        tRow += 1
-                        out += ANSICode.moveTo(row: tRow, col: timelineX)
-                        out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 4))\(ANSICode.reset)"
-                        tRow += 1
-                        showedNext = true
-                    } else if !entry.isCurrent && !pastCurrent {
-                        continue  // Skip tracks before current — history handles played tracks
-                    }
-                    out += ANSICode.moveTo(row: tRow, col: timelineX)
-                    let idx = String(format: "%02d", entry.index)
-                    let rowText = truncText("\(entry.name) \u{2014} \(entry.artist)", to: timelineW - 8)
-                    if entry.isCurrent {
-                        out += "\(ANSICode.green)\u{25B6}\(ANSICode.reset) \(ANSICode.bold)\(idx)  \(rowText)\(ANSICode.reset)"
-                    } else {
-                        out += "\(ANSICode.dim)   \(idx)  \(rowText)\(ANSICode.reset)"
-                    }
-                    tRow += 1
-                }
-            }
+            let currentIdx = findCurrentTrackIndex(np: np)
+            let rows = buildPlaylistRows(contextTracks: contextTracks, history: history, currentIndex: currentIdx)
+            out += renderTimelineRows(
+                rows: rows,
+                header: "Playlist",
+                x: timelineX,
+                y: metaY,
+                width: timelineW,
+                visibleHeight: frame.statusY - metaY - 2,
+                cursorIndex: queueCursor,
+                scrollOffset: &queueScroll
+            )
         }
 
         print(out, terminator: "")
@@ -525,7 +813,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     func renderStopped() {
         let frame = ScreenFrame.current()
         let footerText = "\(ANSICode.bold)b\(ANSICode.reset) Back   \(ANSICode.bold)q\(ANSICode.reset) Quit"
-        var out = renderShell(title: "Now Playing", status: "", footer: footerText)
+        var out = ANSICode.clearScreen + renderShell(title: "Now Playing", status: "", footer: footerText)
         out += ANSICode.moveTo(row: frame.bodyY + 2, col: 3)
         out += "\(ANSICode.dim)Nothing playing.\(ANSICode.reset)"
         print(out, terminator: "")
@@ -546,73 +834,25 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     func refreshTimelineOnly() {
         let frame = ScreenFrame.current()
         let timelineW = frame.width - timelineX - 3
-        guard timelineW >= 24 && !contextTracks.isEmpty else { return }
+        let currentIdx = lastCurrentIdx
+        let rows = buildPlaylistRows(contextTracks: contextTracks, history: history, currentIndex: currentIdx)
+        guard timelineW >= 24 && !rows.isEmpty else { return }
 
         var out = ""
         for r in metaY..<(frame.statusY - 2) {
             out += ANSICode.moveTo(row: r, col: timelineX)
             out += String(repeating: " ", count: max(0, timelineW))
         }
-
-        var tRow = metaY
-        out += ANSICode.moveTo(row: tRow, col: timelineX)
-        out += "\(ANSICode.bold)\(ANSICode.cyan)Timeline\(ANSICode.reset)"
-        tRow += 1
-        out += ANSICode.moveTo(row: tRow, col: timelineX)
-        out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 8))\(ANSICode.reset)"
-        tRow += 2
-
-        // Played — real session history
-        if !history.isEmpty {
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.dim)Played\(ANSICode.reset)"
-            tRow += 1
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 6))\(ANSICode.reset)"
-            tRow += 1
-            for h in history.prefix(3).reversed() {
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                let text = truncText("\(h.track) \u{2014} \(h.artist)", to: timelineW - 4)
-                out += "\(ANSICode.dim)  \(text)\(ANSICode.reset)"
-                tRow += 1
-            }
-            tRow += 1
-        }
-
-        // Next tracks only (skip current — already shown in metadata)
-        let currentIdx = lastCurrentIdx
-        let startFrom = (currentIdx ?? -1) + 1
-
-        if startFrom < contextTracks.count {
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.bold)\(ANSICode.cyan)Next\(ANSICode.reset)"
-            tRow += 1
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 4))\(ANSICode.reset)"
-            tRow += 1
-
-            let trackRows = max(1, frame.statusY - tRow - 2)
-
-            if queueCursor < startFrom { queueCursor = startFrom }
-            if queueScroll < startFrom { queueScroll = startFrom }
-            if queueCursor < queueScroll { queueScroll = queueCursor }
-            if queueCursor >= queueScroll + trackRows { queueScroll = queueCursor - trackRows + 1 }
-
-            let qEnd = min(contextTracks.count, queueScroll + trackRows)
-            for i in queueScroll..<qEnd {
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                let idx = String(format: "%02d", i + 1)
-                let rowText = truncText(contextTracks[i], to: timelineW - 8)
-                let isCursor = (i == queueCursor)
-
-                if isCursor {
-                    out += " \(ANSICode.cyan)\u{25B8}\(ANSICode.reset) \(idx)  \(rowText)"
-                } else {
-                    out += "\(ANSICode.dim)   \(idx)  \(rowText)\(ANSICode.reset)"
-                }
-                tRow += 1
-            }
-        }
+        out += renderTimelineRows(
+            rows: rows,
+            header: "Playlist",
+            x: timelineX,
+            y: metaY,
+            width: timelineW,
+            visibleHeight: frame.statusY - metaY - 2,
+            cursorIndex: queueCursor,
+            scrollOffset: &queueScroll
+        )
 
         print(out, terminator: "")
         fflush(stdout)
@@ -632,10 +872,10 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     if let np = pollNowPlaying() {
         lastTrackName = np.track
         lastArtistName = np.artist
+        lastShuffleEnabled = np.shuffleEnabled
+        stoppedPolls = 0
         refreshArtwork()
-        // Sync queue cursor to current track
         if let idx = findCurrentTrackIndex(np: np) {
-            queueCursor = idx
             lastCurrentIdx = idx
         }
         render(np)
@@ -658,31 +898,20 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
                 }
             case .down:
                 if !contextTracks.isEmpty {
-                    queueCursor = min(contextTracks.count - 1, queueCursor + 1)
+                    let rows = buildPlaylistRows(contextTracks: contextTracks, history: history, currentIndex: lastCurrentIdx)
+                    queueCursor = min(max(0, rows.count - 1), queueCursor + 1)
                     refreshTimelineOnly()
                     continue
                 } else {
                     _ = try? syncRun { try await backend.runMusic("next track") }
                 }
             case .enter:
-                if !contextTracks.isEmpty && queueCursor < contextTracks.count {
-                    // Play the selected track from context
-                    let trackLine = contextTracks[queueCursor]
-                    let trackParts = trackLine.split(separator: "\u{2014}", maxSplits: 1)
-                        .map { $0.trimmingCharacters(in: .whitespaces) }
-                    let title = trackParts.first ?? ""
-                    let artist = trackParts.count > 1 ? trackParts[1] : ""
-                    let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-                    let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
+                let rows = buildPlaylistRows(contextTracks: contextTracks, history: history, currentIndex: lastCurrentIdx)
+                if queueCursor < rows.count {
+                    let row = rows[queueCursor]
                     let plName = context?.playlistName ?? ""
-                    _ = try? syncRun {
-                        try await backend.runMusic("""
-                            set results to (every track of playlist "\(plName)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
-                            if (count of results) = 0 then
-                                set results to (every track of playlist "\(plName)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
-                            end if
-                            if (count of results) > 0 then play item 1 of results
-                        """)
+                    if let index = row.index {
+                        playTrackInPlaylist(backend: backend, playlistName: plName, index: index)
                     }
                 }
             case .left:
@@ -699,25 +928,29 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
                 _ = try? syncRun {
                     try await backend.runMusic("""
                         set sh to shuffle enabled
-                        set rp to song repeat as text
-                        if sh is true then
-                            set shuffle enabled to false
-                            set song repeat to all
-                        else if rp is "all" then
-                            set song repeat to one
-                        else if rp is "one" then
-                            set song repeat to off
-                        else
-                            set shuffle enabled to true
-                        end if
+                        set shuffle enabled to not sh
                     """)
                 }
             case .char("r"):
                 startRadioStation()
-            case .char("l"):
-                _ = try? syncRun { try await backend.runMusic("set loved of current track to not (loved of current track)") }
-            case .char("d"):
-                _ = try? syncRun { try await backend.runMusic("set disliked of current track to not (disliked of current track)") }
+            case .char("p"), .char("P"), .char("<"), .char(","):
+                if let idx = lastCurrentIdx, let plName = context?.playlistName {
+                    if lastShuffleEnabled, contextTracks.count > 1 {
+                        let randomIndex = (0..<contextTracks.count).filter { $0 != idx }.randomElement() ?? max(0, idx - 1)
+                        playTrackInPlaylist(backend: backend, playlistName: plName, index: randomIndex + 1)
+                    } else if idx > 0 {
+                        playTrackInPlaylist(backend: backend, playlistName: plName, index: idx)
+                    }
+                }
+            case .char("n"), .char("N"), .char(">"), .char("."):
+                if let idx = lastCurrentIdx, let plName = context?.playlistName {
+                    if lastShuffleEnabled, contextTracks.count > 1 {
+                        let randomIndex = (0..<contextTracks.count).filter { $0 != idx }.randomElement() ?? min(contextTracks.count - 1, idx + 1)
+                        playTrackInPlaylist(backend: backend, playlistName: plName, index: randomIndex + 1)
+                    } else if idx + 1 < contextTracks.count {
+                        playTrackInPlaylist(backend: backend, playlistName: plName, index: idx + 2)
+                    }
+                }
             case .char("+"), .char("="):
                 _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume + 5)") }
             case .char("-"):
@@ -800,17 +1033,17 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
 
         // Re-poll and render
         if let np = pollNowPlaying() {
+            stoppedPolls = 0
+            lastShuffleEnabled = np.shuffleEnabled
             if np.track != lastTrackName {
                 if !lastTrackName.isEmpty {
                     history.insert((track: lastTrackName, artist: lastArtistName), at: 0)
-                    if history.count > 5 { history.removeLast() }
+                    if history.count > 20 { history.removeLast() }
                 }
                 lastTrackName = np.track
                 lastArtistName = np.artist
                 refreshArtwork()
-                // Sync queue cursor to current track if it changed
                 if let idx = findCurrentTrackIndex(np: np) {
-                    queueCursor = idx
                     lastCurrentIdx = idx
                 }
                 flushStdin()
@@ -822,6 +1055,22 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
             }
             render(np)
         } else {
+            stoppedPolls += 1
+            if let idx = lastCurrentIdx,
+               idx + 1 < contextTracks.count,
+               let plName = context?.playlistName {
+                if lastShuffleEnabled, contextTracks.count > 1 {
+                    let randomIndex = (0..<contextTracks.count).filter { $0 != idx }.randomElement() ?? min(contextTracks.count - 1, idx + 1)
+                    playTrackInPlaylist(backend: backend, playlistName: plName, index: randomIndex + 1)
+                } else {
+                    playTrackInPlaylist(backend: backend, playlistName: plName, index: idx + 2)
+                }
+                stoppedPolls = 0
+                continue
+            }
+            if !lastTrackName.isEmpty && stoppedPolls < 4 {
+                continue
+            }
             renderStopped()
         }
     }
@@ -845,20 +1094,23 @@ func runNowPlayingTUI() {
     let timelineX = 80
     let progBarW = 18
 
-    var trackList: [TrackListEntry] = []
+    var surroundingTracks: [TrackListEntry] = []
     var artLines: [String] = []
     var lastTrackName = ""
     var lastArtistName = ""
+    var lastPosition = 0
+    var lastDuration = 0
+    var stoppedPolls = 0
     var history: [(track: String, artist: String)] = []
     var timelineCursor = 0
+    var timelineScroll = 0
 
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let timelineW = frame.width - timelineX - 3
-        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑ ↓\(ANSICode.reset) Skip   \(ANSICode.bold)← →\(ANSICode.reset) Seek   \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}   \(ANSICode.bold)z\(ANSICode.reset) Mode   \(ANSICode.bold)r\(ANSICode.reset) Radio   \(ANSICode.bold)l\(ANSICode.reset) Love   \(ANSICode.bold)d\(ANSICode.reset) Dis   \(ANSICode.bold)s\(ANSICode.reset) Spk   \(ANSICode.bold)v\(ANSICode.reset) Mix   \(ANSICode.bold)+-\(ANSICode.reset) Vol   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑↓\(ANSICode.reset) Album  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)p/n\(ANSICode.reset) Skip  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         var out = renderShell(title: "\u{266B} Now Playing", status: "", footer: footerText)
-
         // --- Cover art ---
         let artSize = min(artW, 26, frame.statusY - artY - 2)
         for i in 0..<artSize {
@@ -870,12 +1122,20 @@ func runNowPlayingTUI() {
 
         // --- Metadata ---
         let playIcon = np.state == "playing" ? "\u{25B6}" : "\u{23F8}"
+        let ratingIcon = np.loved ? " \(ANSICode.red)\u{2665}\(ANSICode.reset)\(ANSICode.bold)" : np.disliked ? " \(ANSICode.dim)\u{2193}\(ANSICode.reset)\(ANSICode.bold)" : ""
+        let titlePrefixLen = np.loved || np.disliked ? 4 : 2
         out += ANSICode.moveTo(row: metaY, col: metaX)
-        out += "\(ANSICode.bold)\(playIcon) \(truncText(np.track, to: metaW - 2))\(ANSICode.reset)"
+        out += String(repeating: " ", count: metaW + 4)
+        out += ANSICode.moveTo(row: metaY, col: metaX)
+        out += "\(ANSICode.bold)\(playIcon)\(ratingIcon) \(truncText(np.track, to: metaW - titlePrefixLen))\(ANSICode.reset)"
 
+        out += ANSICode.moveTo(row: metaY + 2, col: metaX)
+        out += String(repeating: " ", count: metaW + 4)
         out += ANSICode.moveTo(row: metaY + 2, col: metaX)
         out += truncText(np.artist, to: metaW)
 
+        out += ANSICode.moveTo(row: metaY + 4, col: metaX)
+        out += String(repeating: " ", count: metaW + 4)
         out += ANSICode.moveTo(row: metaY + 4, col: metaX)
         out += "\(ANSICode.dim)\(truncText(np.album, to: metaW))\(ANSICode.reset)"
 
@@ -921,68 +1181,27 @@ func runNowPlayingTUI() {
         if np.shuffleEnabled { modeStr += "Shuffle" }
         if np.repeatMode == "one" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat One" }
         else if np.repeatMode == "all" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat" }
+        let modeRow = np.speakers.isEmpty ? metaY + 12 : metaY + 18
+        out += ANSICode.moveTo(row: modeRow, col: metaX)
+        out += String(repeating: " ", count: metaW + 4)
         if !modeStr.isEmpty {
-            let modeRow = np.speakers.isEmpty ? metaY + 12 : metaY + 18
             out += ANSICode.moveTo(row: modeRow, col: metaX)
             out += "\(ANSICode.dim)\(modeStr)\(ANSICode.reset)"
         }
 
         // --- Timeline pane ---
         if timelineW >= 24 {
-            var tRow = metaY
-
-            // Pane header
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.bold)\(ANSICode.cyan)Timeline\(ANSICode.reset)"
-            tRow += 1
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 8))\(ANSICode.reset)"
-            tRow += 2
-
-            // Played — real session history
-            if !history.isEmpty {
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                out += "\(ANSICode.dim)Played\(ANSICode.reset)"
-                tRow += 1
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 6))\(ANSICode.reset)"
-                tRow += 1
-                for h in history.prefix(3).reversed() {
-                    out += ANSICode.moveTo(row: tRow, col: timelineX)
-                    let text = truncText("\(h.track) \u{2014} \(h.artist)", to: timelineW - 4)
-                    out += "\(ANSICode.dim)  \(text)\(ANSICode.reset)"
-                    tRow += 1
-                }
-                tRow += 1
-            }
-
-            // Next tracks only (current track shown in metadata)
-            let nextTracks = trackList.drop(while: { !$0.isCurrent }).dropFirst()
-            if !nextTracks.isEmpty {
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                out += "\(ANSICode.bold)\(ANSICode.cyan)Next\(ANSICode.reset)"
-                tRow += 1
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 4))\(ANSICode.reset)"
-                tRow += 1
-
-                let maxVisible = min(12, frame.statusY - tRow - 2)
-                let nextArray = Array(nextTracks)
-                if timelineCursor >= nextArray.count { timelineCursor = max(0, nextArray.count - 1) }
-                for (ti, entry) in nextArray.prefix(maxVisible).enumerated() {
-                    out += ANSICode.moveTo(row: tRow, col: timelineX)
-                    let idx = String(format: "%02d", entry.index)
-                    let rowText = truncText("\(entry.name) \u{2014} \(entry.artist)", to: timelineW - 8)
-                    let isCursor = (ti == timelineCursor)
-
-                    if isCursor {
-                        out += " \(ANSICode.cyan)\u{25B8}\(ANSICode.reset) \(idx)  \(rowText)"
-                    } else {
-                        out += "\(ANSICode.dim)   \(idx)  \(rowText)\(ANSICode.reset)"
-                    }
-                    tRow += 1
-                }
-            }
+            let rows = buildStandaloneRows(history: history, surrounding: surroundingTracks)
+            out += renderTimelineRows(
+                rows: rows,
+                header: "Album",
+                x: timelineX,
+                y: metaY,
+                width: timelineW,
+                visibleHeight: frame.statusY - metaY - 2,
+                cursorIndex: timelineCursor,
+                scrollOffset: &timelineScroll
+            )
         }
 
         print(out, terminator: "")
@@ -992,15 +1211,15 @@ func runNowPlayingTUI() {
     func renderStopped() {
         let frame = ScreenFrame.current()
         let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)q\(ANSICode.reset) Quit"
-        var out = renderShell(title: "Now Playing", status: "", footer: footerText)
+        var out = ANSICode.clearScreen + renderShell(title: "Now Playing", status: "", footer: footerText)
         out += ANSICode.moveTo(row: frame.bodyY + 2, col: 3)
         out += "\(ANSICode.dim)Nothing playing.\(ANSICode.reset)"
         print(out, terminator: "")
         fflush(stdout)
     }
 
-    func refreshTrackContext() {
-        trackList = pollSurroundingTracks()
+    func refreshTrackContext(_ np: NowPlayingState) {
+        surroundingTracks = pollAlbumTracks(for: np)
         let frame = ScreenFrame.current()
         let artSize = min(artW, 26, frame.statusY - artY - 2)
         if let artPath = extractArtwork() {
@@ -1014,66 +1233,24 @@ func runNowPlayingTUI() {
     func refreshTimelineOnly() {
         let frame = ScreenFrame.current()
         let timelineW = frame.width - timelineX - 3
-        guard timelineW >= 24 && !trackList.isEmpty else { return }
+        let rows = buildStandaloneRows(history: history, surrounding: surroundingTracks)
+        guard timelineW >= 24 && !rows.isEmpty else { return }
 
         var out = ""
         for r in metaY..<(frame.statusY - 2) {
             out += ANSICode.moveTo(row: r, col: timelineX)
             out += String(repeating: " ", count: max(0, timelineW))
         }
-
-        var tRow = metaY
-        out += ANSICode.moveTo(row: tRow, col: timelineX)
-        out += "\(ANSICode.bold)\(ANSICode.cyan)Timeline\(ANSICode.reset)"
-        tRow += 1
-        out += ANSICode.moveTo(row: tRow, col: timelineX)
-        out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 8))\(ANSICode.reset)"
-        tRow += 2
-
-        // Played — real session history
-        if !history.isEmpty {
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.dim)Played\(ANSICode.reset)"
-            tRow += 1
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 6))\(ANSICode.reset)"
-            tRow += 1
-            for h in history.prefix(3).reversed() {
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                let text = truncText("\(h.track) \u{2014} \(h.artist)", to: timelineW - 4)
-                out += "\(ANSICode.dim)  \(text)\(ANSICode.reset)"
-                tRow += 1
-            }
-            tRow += 1
-        }
-
-        // Next tracks only
-        let nextTracks = trackList.drop(while: { !$0.isCurrent }).dropFirst()
-        if !nextTracks.isEmpty {
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.bold)\(ANSICode.cyan)Next\(ANSICode.reset)"
-            tRow += 1
-            out += ANSICode.moveTo(row: tRow, col: timelineX)
-            out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: 4))\(ANSICode.reset)"
-            tRow += 1
-
-            let maxVisible = min(12, frame.statusY - tRow - 2)
-            let nextArray = Array(nextTracks)
-            if timelineCursor >= nextArray.count { timelineCursor = max(0, nextArray.count - 1) }
-            for (ti, entry) in nextArray.prefix(maxVisible).enumerated() {
-                out += ANSICode.moveTo(row: tRow, col: timelineX)
-                let idx = String(format: "%02d", entry.index)
-                let rowText = truncText("\(entry.name) \u{2014} \(entry.artist)", to: timelineW - 8)
-                let isCursor = (ti == timelineCursor)
-
-                if isCursor {
-                    out += " \(ANSICode.cyan)\u{25B8}\(ANSICode.reset) \(idx)  \(rowText)"
-                } else {
-                    out += "\(ANSICode.dim)   \(idx)  \(rowText)\(ANSICode.reset)"
-                }
-                tRow += 1
-            }
-        }
+        out += renderTimelineRows(
+            rows: rows,
+            header: "Album",
+            x: timelineX,
+            y: metaY,
+            width: timelineW,
+            visibleHeight: frame.statusY - metaY - 2,
+            cursorIndex: timelineCursor,
+            scrollOffset: &timelineScroll
+        )
 
         print(out, terminator: "")
         fflush(stdout)
@@ -1088,23 +1265,17 @@ func runNowPlayingTUI() {
         }
     }
 
-    var lastSkipTime: UInt64 = 0
-    func millisSinceEpoch() -> UInt64 {
-        var tv = timeval()
-        gettimeofday(&tv, nil)
-        return UInt64(tv.tv_sec) * 1000 + UInt64(tv.tv_usec) / 1000
-    }
-
     // Initial render
     let backend = AppleScriptBackend()
     if let np = pollNowPlaying() {
         lastTrackName = np.track
         lastArtistName = np.artist
-        refreshTrackContext()
-        // Sync cursor to current track
-        if let ci = trackList.firstIndex(where: { $0.isCurrent }) {
-            timelineCursor = ci
-        }
+        lastPosition = np.position
+        lastDuration = np.duration
+        stoppedPolls = 0
+        refreshTrackContext(np)
+        let rows = buildStandaloneRows(history: history, surrounding: surroundingTracks)
+        timelineCursor = rows.firstIndex(where: { $0.isCurrent }) ?? 0
         render(np)
     } else {
         renderStopped()
@@ -1116,31 +1287,24 @@ func runNowPlayingTUI() {
         if let key = key {
             switch key {
             case .up:
-                if !trackList.isEmpty {
+                let rows = buildStandaloneRows(history: history, surrounding: surroundingTracks)
+                if !rows.isEmpty {
                     timelineCursor = max(0, timelineCursor - 1)
                     refreshTimelineOnly()
                     continue
                 }
             case .down:
-                if !trackList.isEmpty {
-                    timelineCursor = min(trackList.count - 1, timelineCursor + 1)
+                let rows = buildStandaloneRows(history: history, surrounding: surroundingTracks)
+                if !rows.isEmpty {
+                    timelineCursor = min(max(0, rows.count - 1), timelineCursor + 1)
                     refreshTimelineOnly()
                     continue
                 }
             case .enter:
-                if timelineCursor < trackList.count {
-                    let entry = trackList[timelineCursor]
-                    let escapedName = entry.name.replacingOccurrences(of: "\"", with: "\\\"")
-                    let escapedArtist = entry.artist.replacingOccurrences(of: "\"", with: "\\\"")
-                    _ = try? syncRun {
-                        try await backend.runMusic("""
-                            set results to (every track of current playlist whose name is "\(escapedName)" and artist is "\(escapedArtist)")
-                            if (count of results) = 0 then
-                                set results to (every track of current playlist whose name contains "\(escapedName)" and artist contains "\(escapedArtist)")
-                            end if
-                            if (count of results) > 0 then play item 1 of results
-                        """)
-                    }
+                let rows = buildStandaloneRows(history: history, surrounding: surroundingTracks)
+                if timelineCursor < rows.count {
+                    let row = rows[timelineCursor]
+                    playLibraryTrack(backend: backend, title: row.title, artist: row.artist)
                 }
             case .left:
                 _ = try? syncRun {
@@ -1152,29 +1316,18 @@ func runNowPlayingTUI() {
                 }
             case .space:
                 _ = try? syncRun { try await backend.runMusic("playpause") }
-            case .char("z"):
-                _ = try? syncRun {
-                    try await backend.runMusic("""
-                        set sh to shuffle enabled
-                        set rp to song repeat as text
-                        if sh is true then
-                            set shuffle enabled to false
-                            set song repeat to all
-                        else if rp is "all" then
-                            set song repeat to one
-                        else if rp is "one" then
-                            set song repeat to off
-                        else
-                            set shuffle enabled to true
-                        end if
-                    """)
-                }
             case .char("r"):
                 startRadioStation()
-            case .char("l"):
-                _ = try? syncRun { try await backend.runMusic("set loved of current track to not (loved of current track)") }
-            case .char("d"):
-                _ = try? syncRun { try await backend.runMusic("set disliked of current track to not (disliked of current track)") }
+            case .char("p"), .char("P"), .char("<"), .char(","):
+                if let currentPos = surroundingTracks.firstIndex(where: { $0.isCurrent }), currentPos > 0 {
+                    let entry = surroundingTracks[currentPos - 1]
+                    playLibraryTrack(backend: backend, title: entry.name, artist: entry.artist)
+                }
+            case .char("n"), .char("N"), .char(">"), .char("."):
+                if let currentPos = surroundingTracks.firstIndex(where: { $0.isCurrent }), currentPos + 1 < surroundingTracks.count {
+                    let entry = surroundingTracks[currentPos + 1]
+                    playLibraryTrack(backend: backend, title: entry.name, artist: entry.artist)
+                }
             case .char("+"), .char("="):
                 _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume + 5)") }
             case .char("-"):
@@ -1254,23 +1407,37 @@ func runNowPlayingTUI() {
 
         // Re-poll and render
         if let np = pollNowPlaying() {
+            stoppedPolls = 0
+            lastPosition = np.position
+            lastDuration = np.duration
             if np.track != lastTrackName {
                 if !lastTrackName.isEmpty {
                     history.insert((track: lastTrackName, artist: lastArtistName), at: 0)
-                    if history.count > 5 { history.removeLast() }
+                    if history.count > 20 { history.removeLast() }
                 }
                 lastTrackName = np.track
                 lastArtistName = np.artist
-                refreshTrackContext()
-                // Sync cursor to current track
-                if let ci = trackList.firstIndex(where: { $0.isCurrent }) {
-                    timelineCursor = ci
-                }
+                refreshTrackContext(np)
+                let rows = buildStandaloneRows(history: history, surrounding: surroundingTracks)
+                timelineCursor = rows.firstIndex(where: { $0.isCurrent }) ?? 0
                 // Drain all input that queued during the slow refresh
                 flushStdin()
             }
             render(np)
         } else {
+            stoppedPolls += 1
+            let naturalEnd = lastDuration > 0 && lastPosition >= max(0, lastDuration - 4)
+            if naturalEnd,
+               let currentPos = surroundingTracks.firstIndex(where: { $0.isCurrent }),
+               currentPos + 1 < surroundingTracks.count {
+                let entry = surroundingTracks[currentPos + 1]
+                playLibraryTrack(backend: backend, title: entry.name, artist: entry.artist)
+                stoppedPolls = 0
+                continue
+            }
+            if !lastTrackName.isEmpty && stoppedPolls < 4 {
+                continue
+            }
             renderStopped()
         }
     }

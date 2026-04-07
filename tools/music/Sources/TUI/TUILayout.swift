@@ -36,22 +36,27 @@ func renderShell(title: String, status: String, footer: String) -> String {
 
     // App label
     out += ANSICode.moveTo(row: 2, col: appX)
+    out += ANSICode.clearLine
     out += "\(ANSICode.dim)music\(ANSICode.reset)"
 
     // Title
     out += ANSICode.moveTo(row: 4, col: appX)
+    out += ANSICode.clearLine
     out += "\(ANSICode.bold)\(ANSICode.cyan)\u{266B} \(title)\(ANSICode.reset)"
 
     // Accent rule
     out += ANSICode.moveTo(row: 5, col: appX)
+    out += ANSICode.clearLine
     out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: min(40, title.count + 4)))\(ANSICode.reset)"
 
     // Status row
     out += ANSICode.moveTo(row: frame.statusY, col: appX)
+    out += ANSICode.clearLine
     out += "\(ANSICode.green)\(status)\(ANSICode.reset)"
 
     // Footer
     out += ANSICode.moveTo(row: frame.footerY, col: appX)
+    out += ANSICode.clearLine
     out += "\(ANSICode.dim)\(footer)\(ANSICode.reset)"
 
     return out

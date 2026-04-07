@@ -59,6 +59,7 @@ enum BrowserResult {
     case playTrack(playlistIndex: Int, trackIndex: Int, context: PlaybackContext, state: BrowserState)
     case playPlaylist(index: Int, context: PlaybackContext, state: BrowserState)
     case shufflePlaylist(index: Int, context: PlaybackContext, state: BrowserState)
+    case nowPlaying(context: PlaybackContext, state: BrowserState)
     case quit
 }
 
@@ -128,9 +129,9 @@ func runPlaylistBrowser(
 
         let footerText: String
         if plFocused {
-            footerText = "\(ANSICode.bold)\u{2191}\u{2193}\(ANSICode.reset) Navigate   \(ANSICode.bold)Tab\(ANSICode.reset) Tracks   \(ANSICode.bold)p\(ANSICode.reset) Play   \(ANSICode.bold)s\(ANSICode.reset) Shuffle   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+            footerText = "\(ANSICode.bold)\u{2191}\u{2193}\(ANSICode.reset) Navigate   \(ANSICode.bold)Tab\(ANSICode.reset) Tracks   \(ANSICode.bold)p\(ANSICode.reset) Play   \(ANSICode.bold)s\(ANSICode.reset) Shuffle   \(ANSICode.bold)b\(ANSICode.reset) Now Playing   \(ANSICode.bold)q\(ANSICode.reset) Quit"
         } else {
-            footerText = "\(ANSICode.bold)\u{2191}\u{2193}\(ANSICode.reset) Navigate   \(ANSICode.bold)Enter\(ANSICode.reset) Play   \(ANSICode.bold)Tab\(ANSICode.reset) Playlists   \(ANSICode.bold)q\(ANSICode.reset) Quit"
+            footerText = "\(ANSICode.bold)\u{2191}\u{2193}\(ANSICode.reset) Navigate   \(ANSICode.bold)Enter\(ANSICode.reset) Play   \(ANSICode.bold)Tab\(ANSICode.reset) Playlists   \(ANSICode.bold)b\(ANSICode.reset) Now Playing   \(ANSICode.bold)q\(ANSICode.reset) Quit"
         }
 
         var out = renderShell(title: "Playlists", status: statusText, footer: footerText)
@@ -296,6 +297,10 @@ func runPlaylistBrowser(
             return .shufflePlaylist(index: plCursor,
                                     context: makeContext(trackIndex: 0),
                                     state: currentState())
+
+        case .char("b"):
+            return .nowPlaying(context: makeContext(trackIndex: 0),
+                               state: currentState())
 
         case .char("q"):
             return .quit

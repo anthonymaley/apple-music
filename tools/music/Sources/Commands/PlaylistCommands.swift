@@ -97,22 +97,9 @@ struct PlaylistBrowse: ParsableCommand {
             case .playTrack(let plIdx, let trIdx, let ctx, let state):
                 browserState = state
                 let plName = names[plIdx]
-                let trackLine = trackCache[plIdx]?.tracks[trIdx] ?? ""
-                let trackParts = trackLine.split(separator: "\u{2014}", maxSplits: 1)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                let title = trackParts.first ?? ""
-                let artist = trackParts.count > 1 ? trackParts[1] : ""
-                let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-                let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
                 let escapedPlName2 = plName.replacingOccurrences(of: "\"", with: "\\\"")
                 _ = try syncRun {
-                    try await backend.runMusic("""
-                        set results to (every track of playlist "\(escapedPlName2)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
-                        if (count of results) = 0 then
-                            set results to (every track of playlist "\(escapedPlName2)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
-                        end if
-                        if (count of results) > 0 then play item 1 of results
-                    """)
+                    try await backend.runMusic("play track \(trIdx + 1) of playlist \"\(escapedPlName2)\"")
                 }
                 let npResult = runNowPlayingWithContext(ctx)
                 if case .quit = npResult { return }
@@ -131,6 +118,11 @@ struct PlaylistBrowse: ParsableCommand {
                 let plName = names[idx].replacingOccurrences(of: "\"", with: "\\\"")
                 _ = try syncRun { try await backend.runMusic("set shuffle enabled to true") }
                 _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
+                let npResult = runNowPlayingWithContext(ctx)
+                if case .quit = npResult { return }
+
+            case .nowPlaying(let ctx, let state):
+                browserState = state
                 let npResult = runNowPlayingWithContext(ctx)
                 if case .quit = npResult { return }
 
