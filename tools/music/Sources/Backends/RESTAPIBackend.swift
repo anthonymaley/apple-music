@@ -70,6 +70,14 @@ struct RESTAPIBackend {
         return try parseSongs(from: data)
     }
 
+    func song(id: String) async throws -> CatalogSong {
+        let (data, status) = try await get("/v1/catalog/\(storefront)/songs/\(id)")
+        guard (200...299).contains(status) else {
+            throw APIError.requestFailed(status)
+        }
+        return try parseCatalogSong(from: data)
+    }
+
     // MARK: - Library Operations (require user token)
 
     func addToLibrary(songIDs: [String]) async throws {
@@ -91,24 +99,37 @@ struct RESTAPIBackend {
         let songs = results?["songs"] as? [String: Any]
         let songData = songs?["data"] as? [[String: Any]] ?? []
 
-        return songData.map { song in
-            let attrs = song["attributes"] as? [String: Any] ?? [:]
-            return CatalogSong(
-                id: song["id"] as? String ?? "",
-                title: attrs["name"] as? String ?? "Unknown",
-                artist: attrs["artistName"] as? String ?? "Unknown",
-                album: attrs["albumName"] as? String ?? ""
-            )
+        return songData.map(parseCatalogSongObject)
+    }
+
+    private func parseCatalogSong(from data: Data) throws -> CatalogSong {
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let songData = json?["data"] as? [[String: Any]] ?? []
+        guard let song = songData.first else {
+            throw APIError.noData
         }
+        return parseCatalogSongObject(song)
+    }
+
+    private func parseCatalogSongObject(_ song: [String: Any]) -> CatalogSong {
+        let attrs = song["attributes"] as? [String: Any] ?? [:]
+        return CatalogSong(
+            id: song["id"] as? String ?? "",
+            title: attrs["name"] as? String ?? "Unknown",
+            artist: attrs["artistName"] as? String ?? "Unknown",
+            album: attrs["albumName"] as? String ?? ""
+        )
     }
 }
 
 enum APIError: Error, LocalizedError {
     case requestFailed(Int)
+    case noData
 
     var errorDescription: String? {
         switch self {
         case .requestFailed(let code): return "API request failed with status \(code)"
+        case .noData: return "API response did not include data"
         }
     }
 }

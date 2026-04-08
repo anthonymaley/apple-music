@@ -17,9 +17,21 @@ One name for everything: **`music`**.
 
 The `name` field in `plugin.json` is `music` — this controls the slash command prefix. "Apple Music" appears in descriptions and docs for discoverability.
 
+## Command Vocabulary
+
+Document clear long-form commands as the primary surface. Short forms are allowed as aliases, but they should not be the only documented path.
+
+Primary examples:
+
+- `music now`, not only `music np`
+- `music volume`, not only `music vol`
+- `music speaker wake`, not an implicit wake hidden behind `music play`
+
+This keeps the command palette, README, and marketplace copy searchable while still allowing fast terminal aliases for experienced users.
+
 ## How Users Interact
 
-There are four interaction layers, from quickest to most flexible:
+There are five interaction layers, from quickest to most flexible:
 
 ### 1. Slash Commands (`/music:*`)
 
@@ -41,7 +53,7 @@ Every slash command has `disable-model-invocation: true` — they execute immedi
 /music:stop kitchen              Remove kitchen from the speaker group
 /music:now                       What's currently playing
 /music:shuffle                   Toggle shuffle on/off
-/music:radio                     Start radio station from current track
+/music:radio                     Build shuffled radio playlist from current track
 ```
 
 **Speakers**
@@ -54,6 +66,8 @@ Every slash command has `disable-model-invocation: true` — they execute immedi
 /music:speaker kitchen stop      Remove kitchen from the group
 /music:speaker airpods only      Switch to AirPods only
 /music:speaker 1 2 5             Add speakers by index from last list
+/music:speaker wake              Wake all active speakers
+/music:speaker wake kitchen      Wake a specific speaker
 ```
 
 **Volume**
@@ -90,7 +104,26 @@ music remove                     Remove current song from current playlist
 /music:playlist delete Old Playlist     Delete a playlist
 ```
 
-### 2. Natural Language (Skill)
+### 2. Interactive TUI
+
+Use a real terminal for TUI surfaces.
+
+```
+music playlist                  Full playlist browser, then Now Playing with the playlist pinned
+music now                       Now Playing with current album context
+```
+
+Current TUI contract:
+
+- `music playlist` does not fetch tracks on every playlist highlight; it loads tracks on selection.
+- Playlist-origin Now Playing shows the full selected playlist and keeps `↑↓` navigation local.
+- Standalone `music now` shows the current album context, not a real Apple Music queue.
+- Radio builds a temporary shuffled playlist and opens a playlist-backed Now Playing view when possible.
+- `Enter` plays the highlighted row.
+- `z` toggles shuffle in playlist-origin Now Playing.
+- Speaker wake is explicit via `music speaker wake`; normal playback does not auto-reset AirPlay outputs.
+
+### 3. Natural Language (Skill)
 
 For complex, multi-step requests — just talk normally. Claude uses the `music` skill to understand what you want and composes the right CLI calls.
 
@@ -105,7 +138,7 @@ For complex, multi-step requests — just talk normally. Claude uses the `music`
 
 The skill triggers automatically when Claude detects music-related intent. No special invocation needed.
 
-### 3. Status Line
+### 4. Status Line
 
 A passive display at the bottom of Claude Code showing what's playing — track, speakers, volume. Always visible, zero token cost.
 
@@ -129,7 +162,7 @@ Enable in `~/.claude/settings.json`:
 }
 ```
 
-### 4. Direct CLI (`music`)
+### 5. Direct CLI (`music`)
 
 For power users who want to use music outside Claude Code — in scripts, shell aliases, or other tools. The CLI has `--json` output for every command, making it scriptable.
 

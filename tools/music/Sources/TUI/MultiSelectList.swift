@@ -171,6 +171,8 @@ func runMultiSelectList(
                     return a.action(cursor, selectedIndices())
                 }
             }
+        case .f7, .f9:
+            break
         }
         render()
     }

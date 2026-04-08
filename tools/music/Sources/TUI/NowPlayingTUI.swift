@@ -329,42 +329,72 @@ func formatTime(_ seconds: Int) -> String {
     return String(format: "%d:%02d", m, s)
 }
 
-func startRadioStation() {
+func escapeAppleScriptString(_ value: String) -> String {
+    value.replacingOccurrences(of: "\"", with: "\\\"")
+}
+
+func startRadioStation() -> PlaybackContext? {
     let backend = AppleScriptBackend()
     // Get current track info
     guard let info = try? syncRun({
         try await backend.runMusic("return name of current track & \"|\" & artist of current track")
-    }) else { return }
+    }) else { return nil }
     let parts = info.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|", maxSplits: 1)
-    guard parts.count >= 2 else { return }
+    guard parts.count >= 2 else { return nil }
     let trackName = String(parts[0])
     let artistName = String(parts[1])
+    let playlistName = "__radio__ \(artistName) — \(trackName)"
+    let escapedPlaylist = escapeAppleScriptString(playlistName)
+    let escapedArtist = escapeAppleScriptString(artistName)
 
     // Search catalog for the artist to build a radio-like playlist
-    let auth = try? AuthManager()
-    guard let devToken = try? auth?.requireDeveloperToken(),
-          let userToken = try? auth?.requireUserToken() else {
-        // No auth — fall back to playing more by the same artist from library
-        _ = try? syncRun {
+    let auth = AuthManager()
+    guard let devToken = try? auth.requireDeveloperToken(),
+          let userToken = try? auth.requireUserToken() else {
+        // No auth — fall back to a real shuffled library playlist by the same artist.
+        let output = try? syncRun {
             try await backend.runMusic("""
-                set artistTracks to (every track of playlist "Library" whose artist contains "\(artistName.replacingOccurrences(of: "\"", with: "\\\""))")
+                try
+                    if exists playlist "\(escapedPlaylist)" then delete playlist "\(escapedPlaylist)"
+                end try
+                make new playlist with properties {name:"\(escapedPlaylist)"}
+                set artistTracks to (every track of playlist "Library" whose artist contains "\(escapedArtist)")
+                set output to ""
+                set addedCount to 0
+                repeat with t in artistTracks
+                    if addedCount is greater than or equal to 50 then exit repeat
+                    duplicate t to playlist "\(escapedPlaylist)"
+                    set addedCount to addedCount + 1
+                    if output is not "" then set output to output & linefeed
+                    set output to output & name of t & " — " & artist of t
+                end repeat
                 set shuffle enabled to true
-                play item 1 of artistTracks
+                if addedCount > 0 then play playlist "\(escapedPlaylist)"
+                return output
             """)
         }
-        return
+        let tracks = output?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: "\n")
+            .filter { !$0.isEmpty } ?? []
+        guard !tracks.isEmpty else { return nil }
+        return PlaybackContext(playlistName: playlistName, tracks: tracks, startIndex: 0)
     }
 
-    let api = RESTAPIBackend(developerToken: devToken, userToken: userToken, storefront: auth!.storefront())
+    let api = RESTAPIBackend(developerToken: devToken, userToken: userToken, storefront: auth.storefront())
 
     // Search for more songs by the same artist
     guard let songs = try? syncRun({ try await api.searchSongs(query: artistName, limit: 25) }),
-          !songs.isEmpty else { return }
+          !songs.isEmpty else { return nil }
 
     // Create a temp playlist and shuffle it
-    let playlistName = "__radio__\(trackName)"
     _ = try? syncRun {
-        try await backend.runMusic("make new playlist with properties {name:\"\(playlistName.replacingOccurrences(of: "\"", with: "\\\""))\"}")
+        try await backend.runMusic("""
+            try
+                if exists playlist "\(escapedPlaylist)" then delete playlist "\(escapedPlaylist)"
+            end try
+            make new playlist with properties {name:"\(escapedPlaylist)"}
+        """)
     }
 
     // Add songs to library first, then to playlist
@@ -372,25 +402,35 @@ func startRadioStation() {
     try? syncRun { try await api.addToLibrary(songIDs: ids) }
     try? syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
 
+    var playlistTracks: [String] = []
     for song in songs {
-        let et = song.title.replacingOccurrences(of: "\"", with: "\\\"")
-        let ea = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
-        _ = try? syncRun {
+        let et = escapeAppleScriptString(song.title)
+        let ea = escapeAppleScriptString(song.artist)
+        let added = try? syncRun {
             try await backend.runMusic("""
                 set results to (every track of playlist "Library" whose name is "\(et)" and artist is "\(ea)")
                 if (count of results) = 0 then
                     set results to (every track of playlist "Library" whose name contains "\(et)" and artist contains "\(ea)")
                 end if
                 if (count of results) > 0 then
-                    duplicate item 1 of results to playlist "\(playlistName.replacingOccurrences(of: "\"", with: "\\\""))"
+                    duplicate item 1 of results to playlist "\(escapedPlaylist)"
+                    return name of item 1 of results & " — " & artist of item 1 of results
                 end if
+                return ""
             """)
+        }
+        let line = added?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !line.isEmpty {
+            playlistTracks.append(line)
         }
     }
 
+    guard !playlistTracks.isEmpty else { return nil }
+
     // Shuffle play the radio playlist
     _ = try? syncRun { try await backend.runMusic("set shuffle enabled to true") }
-    _ = try? syncRun { try await backend.runMusic("play playlist \"\(playlistName.replacingOccurrences(of: "\"", with: "\\\""))\"") }
+    _ = try? syncRun { try await backend.runMusic("play playlist \"\(escapedPlaylist)\"") }
+    return PlaybackContext(playlistName: playlistName, tracks: playlistTracks, startIndex: 0)
 }
 
 // MARK: - Now Playing result for context-aware mode
@@ -689,7 +729,8 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     var queueCursor = context?.startIndex ?? 0
     var queueScroll = 0
     // Build queue entries from context
-    let contextTracks: [String] = context?.tracks ?? []
+    var activePlaylistName = context?.playlistName ?? ""
+    var contextTracks: [String] = context?.tracks ?? []
 
     func findCurrentTrackIndex(np: NowPlayingState) -> Int? {
         // Match by track name in the context track list
@@ -706,9 +747,9 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let timelineW = frame.width - timelineX - 3
-        let footerText = "\(ANSICode.bold)↑↓\(ANSICode.reset) Playlist  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)p/n\(ANSICode.reset) Skip  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}  \(ANSICode.bold)z\(ANSICode.reset) Shuffle  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)b\(ANSICode.reset) Back  \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.bold)↑↓\(ANSICode.reset) Playlist  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}  \(ANSICode.bold)z\(ANSICode.reset) Shuffle  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)b\(ANSICode.reset) Back  \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
-        let titleText = context != nil ? "\u{266B} Now Playing \u{2014} \(context!.playlistName)" : "\u{266B} Now Playing"
+        let titleText = !activePlaylistName.isEmpty ? "\u{266B} Now Playing \u{2014} \(activePlaylistName)" : "\u{266B} Now Playing"
         var out = renderShell(title: titleText, status: "", footer: footerText)
         out += ANSICode.moveTo(row: frame.bodyY + 2, col: 1)
         out += String(repeating: " ", count: frame.width)
@@ -909,7 +950,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
                 let rows = buildPlaylistRows(contextTracks: contextTracks, history: history, currentIndex: lastCurrentIdx)
                 if queueCursor < rows.count {
                     let row = rows[queueCursor]
-                    let plName = context?.playlistName ?? ""
+                    let plName = activePlaylistName
                     if let index = row.index {
                         playTrackInPlaylist(backend: backend, playlistName: plName, index: index)
                     }
@@ -932,23 +973,33 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
                     """)
                 }
             case .char("r"):
-                startRadioStation()
-            case .char("p"), .char("P"), .char("<"), .char(","):
-                if let idx = lastCurrentIdx, let plName = context?.playlistName {
+                if let radioContext = startRadioStation() {
+                    activePlaylistName = radioContext.playlistName
+                    contextTracks = radioContext.tracks
+                    queueCursor = radioContext.startIndex
+                    queueScroll = 0
+                    history.removeAll()
+                    lastTrackName = ""
+                    lastArtistName = ""
+                    lastCurrentIdx = nil
+                    refreshTimelineOnly()
+                }
+            case .f7, .char("<"), .char(","):
+                if let idx = lastCurrentIdx, !activePlaylistName.isEmpty {
                     if lastShuffleEnabled, contextTracks.count > 1 {
                         let randomIndex = (0..<contextTracks.count).filter { $0 != idx }.randomElement() ?? max(0, idx - 1)
-                        playTrackInPlaylist(backend: backend, playlistName: plName, index: randomIndex + 1)
+                        playTrackInPlaylist(backend: backend, playlistName: activePlaylistName, index: randomIndex + 1)
                     } else if idx > 0 {
-                        playTrackInPlaylist(backend: backend, playlistName: plName, index: idx)
+                        playTrackInPlaylist(backend: backend, playlistName: activePlaylistName, index: idx)
                     }
                 }
-            case .char("n"), .char("N"), .char(">"), .char("."):
-                if let idx = lastCurrentIdx, let plName = context?.playlistName {
+            case .f9, .char(">"), .char("."):
+                if let idx = lastCurrentIdx, !activePlaylistName.isEmpty {
                     if lastShuffleEnabled, contextTracks.count > 1 {
                         let randomIndex = (0..<contextTracks.count).filter { $0 != idx }.randomElement() ?? min(contextTracks.count - 1, idx + 1)
-                        playTrackInPlaylist(backend: backend, playlistName: plName, index: randomIndex + 1)
+                        playTrackInPlaylist(backend: backend, playlistName: activePlaylistName, index: randomIndex + 1)
                     } else if idx + 1 < contextTracks.count {
-                        playTrackInPlaylist(backend: backend, playlistName: plName, index: idx + 2)
+                        playTrackInPlaylist(backend: backend, playlistName: activePlaylistName, index: idx + 2)
                     }
                 }
             case .char("+"), .char("="):
@@ -1058,12 +1109,12 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
             stoppedPolls += 1
             if let idx = lastCurrentIdx,
                idx + 1 < contextTracks.count,
-               let plName = context?.playlistName {
+               !activePlaylistName.isEmpty {
                 if lastShuffleEnabled, contextTracks.count > 1 {
                     let randomIndex = (0..<contextTracks.count).filter { $0 != idx }.randomElement() ?? min(contextTracks.count - 1, idx + 1)
-                    playTrackInPlaylist(backend: backend, playlistName: plName, index: randomIndex + 1)
+                    playTrackInPlaylist(backend: backend, playlistName: activePlaylistName, index: randomIndex + 1)
                 } else {
-                    playTrackInPlaylist(backend: backend, playlistName: plName, index: idx + 2)
+                    playTrackInPlaylist(backend: backend, playlistName: activePlaylistName, index: idx + 2)
                 }
                 stoppedPolls = 0
                 continue
@@ -1108,7 +1159,7 @@ func runNowPlayingTUI() {
     func render(_ np: NowPlayingState) {
         let frame = ScreenFrame.current()
         let timelineW = frame.width - timelineX - 3
-        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑↓\(ANSICode.reset) Album  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)p/n\(ANSICode.reset) Skip  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)q\(ANSICode.reset) Quit"
+        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑↓\(ANSICode.reset) Album  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         var out = renderShell(title: "\u{266B} Now Playing", status: "", footer: footerText)
         // --- Cover art ---
@@ -1317,13 +1368,17 @@ func runNowPlayingTUI() {
             case .space:
                 _ = try? syncRun { try await backend.runMusic("playpause") }
             case .char("r"):
-                startRadioStation()
-            case .char("p"), .char("P"), .char("<"), .char(","):
+                if let radioContext = startRadioStation() {
+                    terminal.exitRawMode()
+                    _ = runNowPlayingWithContext(radioContext)
+                    return
+                }
+            case .f7, .char("<"), .char(","):
                 if let currentPos = surroundingTracks.firstIndex(where: { $0.isCurrent }), currentPos > 0 {
                     let entry = surroundingTracks[currentPos - 1]
                     playLibraryTrack(backend: backend, title: entry.name, artist: entry.artist)
                 }
-            case .char("n"), .char("N"), .char(">"), .char("."):
+            case .f9, .char(">"), .char("."):
                 if let currentPos = surroundingTracks.firstIndex(where: { $0.isCurrent }), currentPos + 1 < surroundingTracks.count {
                     let entry = surroundingTracks[currentPos + 1]
                     playLibraryTrack(backend: backend, title: entry.name, artist: entry.artist)

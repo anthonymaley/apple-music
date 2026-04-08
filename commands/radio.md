@@ -1,6 +1,6 @@
 ---
 name: radio
-description: "Start a radio station from the currently playing track"
+description: "Build a shuffled radio playlist from the currently playing track"
 disable-model-invocation: true
 ---
 

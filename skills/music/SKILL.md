@@ -22,10 +22,13 @@ music play "Working Vibes" shuffle            # play with shuffle
 music play 3                                  # play result #3 from last search
 music play "Working Vibes" kitchen 20         # play on Kitchen speaker at vol 20
 music play "Working Vibes" kitchen 20 shuffle # routed + shuffled
+music play "Gypsy Woman" "Tom Misch"          # song + artist; catalog fallback if authenticated
+music play "https://music.apple.com/...?...i=1581424482" # catalog song URL; quote it in zsh
 music play --playlist "Working Vibes"         # explicit playlist flag
+music play "Gypsy Woman (Quarantine Sessions)" # play matching local Library album/song
+music play --album "Kid A" --artist "Radiohead" # explicit local Library album + artist
 music play --song "Get It Done" --artist "Fouk"  # search library + play
 music play --verbose                          # diagnostic output on stderr
-music play --no-wake                          # skip speaker wake cycle
 music pause
 music skip                                    # next track
 music back                                    # previous track
@@ -34,7 +37,7 @@ music now                                     # what's playing + speakers
 music now --json                              # structured: track, artist, album, speakers, state
 music shuffle on|off
 music repeat off|one|all
-music radio                                   # start radio station from current track
+music radio                                   # build shuffled radio playlist from current track
 ```
 
 ## Speakers (no auth)
@@ -126,11 +129,13 @@ music mix --artists "Fouk,Floating Points" --count 20 --name "Friday Mix"  # mix
 ## Interactive TUI (requires real terminal, not Claude Code)
 
 ```bash
-music now                                     # now playing TUI with timeline
+music now                                     # now playing TUI with album context
 music playlist                                # 2-pane playlist browser
 ```
 
-TUI controls: `↑↓` navigate timeline (instant), `Enter` play selected, `←→` seek, `Space` pause, `z` cycle shuffle/repeat, `r` radio, `l` love, `d` dislike, `+/-` volume, `s` speakers, `v` mixer, `q` quit.
+TUI behavior: standalone `music now` shows the current album context; `music playlist` hands off to Now Playing with the full selected playlist pinned. Radio builds a temporary shuffled playlist and hands off to the same playlist-backed Now Playing view when possible. Cursor movement is local and fast.
+
+TUI controls: `↑↓` navigate the right pane, `Enter` play selected, `←→` seek, `Space` pause, `z` toggle shuffle in playlist-origin Now Playing, `r` build radio playlist, `+/-` volume, `s` speakers, `v` mixer, `q` quit.
 
 ## Result Cache
 

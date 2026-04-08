@@ -28,6 +28,7 @@ struct ANSICode {
 
 enum KeyPress {
     case up, down, left, right
+    case f7, f9
     case enter, space, escape
     case char(Character)
 
@@ -52,6 +53,19 @@ enum KeyPress {
                 case 0x42: return .down
                 case 0x43: return .right
                 case 0x44: return .left
+                case 0x31...0x39:
+                    var sequence = String(UnicodeScalar(seq2))
+                    while let next = readByte() {
+                        sequence.append(Character(UnicodeScalar(next)))
+                        if next == 0x7E || (next >= 0x40 && next <= 0x7E) {
+                            break
+                        }
+                    }
+                    switch sequence {
+                    case "18~": return .f7
+                    case "20~": return .f9
+                    default: return nil
+                    }
                 default: return nil
                 }
             }

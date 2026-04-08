@@ -117,6 +117,10 @@ Instant execution. No AI reasoning, no token cost. Type `/music:` and tab to dis
 | `/music:play Working Vibes kitchen 60` | Play on a speaker at volume |
 | `/music:play Working Vibes shuffle` | Shuffle a playlist |
 | `/music:play 3` | Play result #3 from last search/playlist |
+| `music play "Gypsy Woman" "Tom Misch"` | Play a song by title + artist; falls back to catalog add if authenticated |
+| `music play "https://music.apple.com/...?...i=1581424482"` | Add/play a catalog song URL when authenticated |
+| `music play "Gypsy Woman (Quarantine Sessions)"` | Play a matching local Library album/song by name |
+| `music play --album "Kid A" --artist "Radiohead"` | Play a local Library album with artist filter |
 | `/music:pause` | Pause |
 | `/music:skip` | Next track |
 | `/music:back` | Previous track |
@@ -124,7 +128,7 @@ Instant execution. No AI reasoning, no token cost. Type `/music:` and tab to dis
 | `/music:stop kitchen` | Remove kitchen from speaker group |
 | `/music:now` | What's playing (track, album, speakers) |
 | `/music:shuffle` | Toggle shuffle on/off |
-| `/music:radio` | Start a radio station from what's playing |
+| `/music:radio` | Build a temporary shuffled radio playlist from what's playing |
 
 ### Speakers & Volume
 
@@ -211,18 +215,7 @@ music play "Working Vibes" kitchen 20 shuffle  # with shuffle
 music play "Working Vibes" "sonos arc" 60      # multi-word speaker names
 ```
 
-A wake cycle runs automatically when a speaker is detected — deselects then reselects the speaker to fix the common AirPlay "ghost connection" problem where a speaker shows as connected but isn't playing audio.
-
-**Inherited-session wake:** If Apple Music is already playing to an AirPlay speaker from a previous session, `music play` (with or without a playlist name) auto-detects the non-local speakers and wakes them before playback. No need to specify the speaker name — it just works.
-
-Use `--no-wake` to skip it, or `--verbose` to see each step:
-
-```bash
-music play "Working Vibes" kitchen 20 --verbose  # see wake cycle steps
-music play "Working Vibes" kitchen 20 --no-wake  # skip wake cycle
-```
-
-For mid-session speaker recovery:
+Speaker routing does not force an automatic wake/reset cycle during normal playback. That keeps playlist changes from cutting out active AirPlay groups. If a speaker shows as connected but produces no sound, run an explicit wake cycle:
 
 ```bash
 music speaker wake              # wake all active speakers
@@ -283,25 +276,23 @@ Claude handles multi-step orchestration — searching the catalog, creating play
 
 Run these commands in a real terminal (not inside Claude Code — TUI requires a TTY). Install `chafa` (`brew install chafa`) for album art in now-playing.
 
-**Now playing** (`music now`) — 3-column layout: album art, playback metadata, and a timeline pane. The timeline shows real session history (Played) and upcoming tracks (Next). Cursor movement is instant — only the timeline redraws, no polling.
+**Now playing** (`music now`) — 3-column layout: album art, playback metadata, and a right pane. Standalone `music now` shows album context for the current track. When launched from `music playlist`, Now Playing keeps the full selected playlist pinned so you can browse and replay any track while playback continues. Radio (`r` or `music radio`) builds a temporary shuffled radio playlist and opens that playlist-backed Now Playing view when possible.
 
 | Key | Action |
 |-----|--------|
-| `↑`/`↓` | Navigate timeline (instant, no poll) |
+| `↑`/`↓` | Navigate the right pane (instant, no poll) |
 | `Enter` | Play selected track |
 | `←`/`→` | Seek ±30s |
 | `Space` | Play/pause |
-| `z` | Cycle mode: off → shuffle → repeat all → repeat one → off |
-| `r` | Start radio station from current track |
-| `l` | Love current track (toggles) |
-| `d` | Dislike current track (toggles) |
+| `z` | Toggle shuffle in playlist-origin Now Playing |
+| `r` | Build a temporary shuffled radio playlist from current track |
 | `+`/`-` | Master volume ±5 |
 | `s` | AirPlay speaker picker |
 | `v` | Per-speaker volume mixer |
 | `b`/`Esc` | Back (playlist mode) / Quit |
 | `q` | Quit |
 
-Two markers in the timeline: green `▶` = currently playing, cyan `▸` = cursor position.
+Two markers in the right pane: green `▶` = currently playing, cyan `▸` = cursor position.
 
 ![Now Playing](media/nowplaying.png)
 

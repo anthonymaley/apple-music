@@ -6,6 +6,7 @@ struct Play: ParsableCommand {
 
     @Argument(help: "Playlist name, result index, or 'shuffle'") var args: [String] = []
     @Option(name: .long, help: "Playlist name") var playlist: String?
+    @Option(name: .long, help: "Album name") var album: String?
     @Option(name: .long, help: "Song name") var song: String?
     @Option(name: .long, help: "Artist name") var artist: String?
     @Flag(name: .long, help: "Output JSON") var json = false
@@ -30,13 +31,24 @@ struct Play: ParsableCommand {
             return
         }
 
-        if let song = song {
+        if let album = album {
             let artistFilter = artist.map { " and artist contains \"\($0)\"" } ?? ""
             let result = try syncRun {
                 try await backend.runMusic("""
-                    set results to (every track of playlist "Library" whose name contains "\(song)"\(artistFilter))
+                    set results to (every track of playlist "Library" whose album contains "\(album)"\(artistFilter))
                     if (count of results) > 0 then
-                        play item 1 of results
+                        set firstTrack to item 1 of results
+                        set firstNumber to 9999
+                        repeat with t in results
+                            try
+                                set n to track number of t
+                                if n > 0 and n < firstNumber then
+                                    set firstNumber to n
+                                    set firstTrack to t
+                                end if
+                            end try
+                        end repeat
+                        play firstTrack
                         return "OK"
                     else
                         return "NOT_FOUND"
@@ -44,38 +56,67 @@ struct Play: ParsableCommand {
                 """)
             }
             if result.trimmingCharacters(in: .whitespacesAndNewlines) == "NOT_FOUND" {
-                print("No tracks found matching '\(song)'")
+                print("No albums found matching '\(album)'")
                 throw ExitCode.failure
             }
             showNowPlaying(json: json, waitForPlay: true)
             return
         }
 
+        if let song = song {
+            if try playLocalSong(backend: backend, title: song, artist: artist) {
+                showNowPlaying(json: json, waitForPlay: true)
+                return
+            }
+
+            let query = [song, artist].compactMap { $0 }.joined(separator: " ")
+            if try addCatalogSongAndPlay(backend: backend, query: query, title: song, artist: artist) {
+                showNowPlaying(json: json, waitForPlay: true)
+                return
+            }
+
+            if let artist {
+                print("No local or catalog tracks found matching '\(song)' by '\(artist)'")
+            } else {
+                print("No local or catalog tracks found matching '\(song)'")
+            }
+            throw ExitCode.failure
+        }
+
+        func playSongArtist(title: String, artist: String) throws -> Bool {
+            verbose("treating two quoted args as song + artist")
+            if try playLocalSong(backend: backend, title: title, artist: artist) {
+                return true
+            }
+            return try addCatalogSongAndPlay(
+                backend: backend,
+                query: "\(title) \(artist)",
+                title: title,
+                artist: artist
+            )
+        }
+
         // Smart positional args
         if !args.isEmpty {
+            if args.count == 1,
+               let catalogID = appleMusicSongID(from: args[0]) {
+                if try addCatalogSongIDAndPlay(backend: backend, id: catalogID) {
+                    showNowPlaying(json: json, waitForPlay: true)
+                    return
+                }
+                print("Could not play Apple Music song id \(catalogID)")
+                throw ExitCode.failure
+            }
+
             // Single integer → play from cache
             if args.count == 1, let index = Int(args[0]) {
                 let cache = ResultCache()
                 let song = try cache.lookupSong(index: index)
-                let escapedTitle = song.title.replacingOccurrences(of: "\"", with: "\\\"")
-                let escapedArtist = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
-                let result = try syncRun {
-                    try await backend.runMusic("""
-                        set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
-                        if (count of results) = 0 then
-                            set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
-                        end if
-                        if (count of results) > 0 then
-                            play item 1 of results
-                            return "OK"
-                        else
-                            return "NOT_FOUND"
-                        end if
-                    """)
-                }
-                if result.trimmingCharacters(in: .whitespacesAndNewlines) == "NOT_FOUND" {
-                    print("'\(song.title)' not in library. Run: music add \(index)")
-                    throw ExitCode.failure
+                if try !playLocalSong(backend: backend, title: song.title, artist: song.artist) {
+                    if try !addCatalogSongAndPlay(backend: backend, query: "\(song.title) \(song.artist)", title: song.title, artist: song.artist) {
+                        print("'\(song.title)' not in library. Run: music add \(index)")
+                        throw ExitCode.failure
+                    }
                 }
                 showNowPlaying(json: json, waitForPlay: true)
                 return
@@ -147,6 +188,17 @@ struct Play: ParsableCommand {
                 }
             }
 
+            if remaining.count == 2,
+               try playSongArtist(title: remaining[0], artist: remaining[1]) {
+                if hasShuffle {
+                    _ = try syncRun {
+                        try await backend.runMusic("set shuffle enabled to true")
+                    }
+                }
+                showNowPlaying(json: json, waitForPlay: true)
+                return
+            }
+
             if !playlistName.isEmpty {
                 let escapedQuery = playlistName.replacingOccurrences(of: "\"", with: "\\\"")
                 let result = try syncRun {
@@ -196,6 +248,88 @@ struct Play: ParsableCommand {
     }
 }
 
+func playLocalSong(backend: AppleScriptBackend, title: String, artist: String?) throws -> Bool {
+    let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+    let artistFilter = artist.map {
+        " and artist contains \"\($0.replacingOccurrences(of: "\"", with: "\\\""))\""
+    } ?? ""
+    let result = try syncRun {
+        try await backend.runMusic("""
+            set results to (every track of playlist "Library" whose name contains "\(escapedTitle)"\(artistFilter))
+            if (count of results) > 0 then
+                play item 1 of results
+                return "OK"
+            else
+                return "NOT_FOUND"
+            end if
+        """)
+    }
+    return result.trimmingCharacters(in: .whitespacesAndNewlines) != "NOT_FOUND"
+}
+
+func addCatalogSongAndPlay(
+    backend: AppleScriptBackend,
+    query: String,
+    title: String,
+    artist: String?
+) throws -> Bool {
+    let auth = AuthManager()
+    guard let devToken = try? auth.requireDeveloperToken(),
+          let userToken = try? auth.requireUserToken() else {
+        verbose("catalog fallback unavailable: MusicKit auth is not configured")
+        return false
+    }
+
+    let api = RESTAPIBackend(developerToken: devToken, userToken: userToken, storefront: auth.storefront())
+    let songs = try syncRun { try await api.searchSongs(query: query, limit: 5) }
+    guard !songs.isEmpty else { return false }
+
+    let preferredArtist = artist?.lowercased()
+    let preferredTitle = title.lowercased()
+    let selected = songs.first {
+        $0.title.lowercased().contains(preferredTitle)
+            && (preferredArtist == nil || $0.artist.lowercased().contains(preferredArtist!))
+    } ?? songs.first {
+        preferredArtist == nil || $0.artist.lowercased().contains(preferredArtist!)
+    } ?? songs[0]
+
+    verbose("catalog fallback matched \"\(selected.title)\" by \"\(selected.artist)\"")
+    try syncRun { try await api.addToLibrary(songIDs: [selected.id]) }
+    withStatus("Syncing library...") {
+        try! syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
+    }
+
+    return try playLocalSong(backend: backend, title: selected.title, artist: selected.artist)
+}
+
+func addCatalogSongIDAndPlay(backend: AppleScriptBackend, id: String) throws -> Bool {
+    let auth = AuthManager()
+    guard let devToken = try? auth.requireDeveloperToken(),
+          let userToken = try? auth.requireUserToken() else {
+        verbose("catalog URL playback unavailable: MusicKit auth is not configured")
+        return false
+    }
+
+    let api = RESTAPIBackend(developerToken: devToken, userToken: userToken, storefront: auth.storefront())
+    let song = try syncRun { try await api.song(id: id) }
+    verbose("catalog URL matched \"\(song.title)\" by \"\(song.artist)\"")
+    try syncRun { try await api.addToLibrary(songIDs: [song.id]) }
+    withStatus("Syncing library...") {
+        try! syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
+    }
+
+    return try playLocalSong(backend: backend, title: song.title, artist: song.artist)
+}
+
+func appleMusicSongID(from value: String) -> String? {
+    guard value.contains("music.apple.com"),
+          let components = URLComponents(string: value),
+          let itemID = components.queryItems?.first(where: { $0.name == "i" })?.value,
+          !itemID.isEmpty else {
+        return nil
+    }
+    return itemID
+}
 
 struct Pause: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Pause playback.")
@@ -343,10 +477,14 @@ struct Radio: ParsableCommand {
         }
         let trackInfo = info.trimmingCharacters(in: .whitespacesAndNewlines)
         print("Building radio station from: \(trackInfo) ...")
-        startRadioStation()
+        let context = startRadioStation()
+        guard let context else {
+            print("Could not build a radio station from: \(trackInfo)")
+            throw ExitCode.failure
+        }
         print("Started radio station from: \(trackInfo)")
         if isTTY() {
-            runNowPlayingTUI()
+            _ = runNowPlayingWithContext(context)
         }
     }
 }
