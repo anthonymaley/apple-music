@@ -9,32 +9,6 @@ struct PlaylistPreview {
     let tracks: [String]  // formatted as "Title — Artist"
 }
 
-func renderArtwork(path: String, width: Int, height: Int) -> [String] {
-    guard let chafaPath = findExecutable("chafa") else { return [] }
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: chafaPath)
-    proc.arguments = [
-        "--format", "symbols",
-        "--size", "\(width)x\(height)",
-        "--symbols", "block+border+space",
-        "--color-space", "rgb",
-        "--work", "9",
-        path
-    ]
-    let pipe = Pipe()
-    proc.standardOutput = pipe
-    proc.standardError = Pipe()
-    do {
-        try proc.run()
-        proc.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if let output = String(data: data, encoding: .utf8), !output.isEmpty {
-            return output.components(separatedBy: "\n").filter { !$0.isEmpty }
-        }
-    } catch {}
-    return []
-}
-
 // MARK: - Shared types for 2-screen browser
 
 struct PlaybackContext {

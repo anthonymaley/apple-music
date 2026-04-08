@@ -26,8 +26,7 @@ struct TrackListEntry {
     let isCurrent: Bool
 }
 
-func pollNowPlaying() -> NowPlayingState? {
-    let backend = AppleScriptBackend()
+func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> NowPlayingState? {
     guard let result = try? syncRun({
         try await backend.runMusic("""
             try
@@ -84,8 +83,7 @@ func pollNowPlaying() -> NowPlayingState? {
     )
 }
 
-func pollSurroundingTracks() -> [TrackListEntry] {
-    let backend = AppleScriptBackend()
+func pollSurroundingTracks(backend: AppleScriptBackend = AppleScriptBackend()) -> [TrackListEntry] {
     guard let result = try? syncRun({
         try await backend.runMusic("""
             try
@@ -125,12 +123,11 @@ func pollSurroundingTracks() -> [TrackListEntry] {
     }
 }
 
-func pollAlbumTracks(for np: NowPlayingState) -> [TrackListEntry] {
+func pollAlbumTracks(for np: NowPlayingState, backend: AppleScriptBackend = AppleScriptBackend()) -> [TrackListEntry] {
     let album = np.album.replacingOccurrences(of: "\"", with: "\\\"")
     let artist = np.artist.replacingOccurrences(of: "\"", with: "\\\"")
     let currentTitle = np.track
     let currentArtist = np.artist
-    let backend = AppleScriptBackend()
 
     guard !album.isEmpty, let result = try? syncRun({
         try await backend.runMusic("""
@@ -162,10 +159,10 @@ func pollAlbumTracks(for np: NowPlayingState) -> [TrackListEntry] {
             end try
             return ""
         """)
-    }) else { return pollSurroundingTracks() }
+    }) else { return pollSurroundingTracks(backend: backend) }
 
     let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return pollSurroundingTracks() }
+    guard !trimmed.isEmpty else { return pollSurroundingTracks(backend: backend) }
 
     let sorted: [TrackListEntry] = trimmed.components(separatedBy: "\n").compactMap { line -> TrackListEntry? in
         let parts = line.split(separator: "|", maxSplits: 2).map(String.init)
@@ -599,20 +596,19 @@ func buildStandaloneRows(
         )
     }
 
-    guard let currentPos = surrounding.firstIndex(where: { $0.isCurrent }) else {
-        return rows
-    }
+    let played = Set(history.map { trackKey(title: $0.track, artist: $0.artist) })
 
-    rows.append(contentsOf: surrounding.enumerated().map { offset, entry in
-        TimelineRow(
-            id: trackKey(title: entry.name, artist: entry.artist),
+    rows.append(contentsOf: surrounding.map { entry in
+        let key = trackKey(title: entry.name, artist: entry.artist)
+        return TimelineRow(
+            id: key,
             kind: .queue,
             index: entry.index,
             title: entry.name,
             artist: entry.artist,
             label: "\(entry.name) — \(entry.artist)",
             isCurrent: entry.isCurrent,
-            wasPlayed: offset < currentPos,
+            wasPlayed: played.contains(key),
             isReplayable: true
         )
     })
@@ -701,6 +697,209 @@ func renderTimelineRows(
     return out
 }
 
+// MARK: - Shared Now Playing Layout
+
+struct NowPlayingLayout {
+    static let artX = 3
+    static let artY = 11
+    static let artW = 26
+    static let metaX = 34
+    static let metaY = 11
+    static let metaW = 30
+    static let timelineX = 80
+    static let progBarW = 18
+}
+
+/// Render metadata, progress bar, speaker info, and mode indicators.
+/// Returns ANSI string to append to output buffer.
+func renderNowPlayingMetadata(
+    np: NowPlayingState,
+    artLines: [String],
+    frame: ScreenFrame
+) -> String {
+    let artX = NowPlayingLayout.artX
+    let artY = NowPlayingLayout.artY
+    let artW = NowPlayingLayout.artW
+    let metaX = NowPlayingLayout.metaX
+    let metaY = NowPlayingLayout.metaY
+    let metaW = NowPlayingLayout.metaW
+    let progBarW = NowPlayingLayout.progBarW
+
+    var out = ""
+
+    // Cover art
+    let artSize = min(artW, 26, frame.statusY - artY - 2)
+    for i in 0..<artSize {
+        if i < artLines.count {
+            out += ANSICode.moveTo(row: artY + i, col: artX)
+            out += "\(artLines[i])\(ANSICode.reset)"
+        }
+    }
+
+    // Track title with rating icon
+    let playIcon = np.state == "playing" ? "\u{25B6}" : "\u{23F8}"
+    let ratingIcon = np.loved ? " \(ANSICode.red)\u{2665}\(ANSICode.reset)\(ANSICode.bold)" : np.disliked ? " \(ANSICode.dim)\u{2193}\(ANSICode.reset)\(ANSICode.bold)" : ""
+    let titlePrefixLen = np.loved || np.disliked ? 4 : 2
+    out += ANSICode.moveTo(row: metaY, col: metaX)
+    out += String(repeating: " ", count: metaW + 4)
+    out += ANSICode.moveTo(row: metaY, col: metaX)
+    out += "\(ANSICode.bold)\(playIcon)\(ratingIcon) \(truncText(np.track, to: metaW - titlePrefixLen))\(ANSICode.reset)"
+
+    // Artist
+    out += ANSICode.moveTo(row: metaY + 2, col: metaX)
+    out += String(repeating: " ", count: metaW + 4)
+    out += ANSICode.moveTo(row: metaY + 2, col: metaX)
+    out += truncText(np.artist, to: metaW)
+
+    // Album
+    out += ANSICode.moveTo(row: metaY + 4, col: metaX)
+    out += String(repeating: " ", count: metaW + 4)
+    out += ANSICode.moveTo(row: metaY + 4, col: metaX)
+    out += "\(ANSICode.dim)\(truncText(np.album, to: metaW))\(ANSICode.reset)"
+
+    // Progress bar
+    let elapsed = formatTime(np.position)
+    let total = formatTime(np.duration)
+    let ratio = np.duration > 0 ? Double(np.position) / Double(np.duration) : 0
+    let knobIdx = max(0, min(progBarW - 1, Int(ratio * Double(progBarW - 1))))
+    var barStr = ""
+    for i in 0..<progBarW {
+        barStr += i == knobIdx ? "\(ANSICode.bold)\u{25CF}\(ANSICode.reset)" : "\(ANSICode.dim)\u{2500}\(ANSICode.reset)"
+    }
+    out += ANSICode.moveTo(row: metaY + 8, col: metaX)
+    out += "\(elapsed) \(barStr) \(total)"
+
+    // Output / Volume grid
+    let labelW = 9
+    if !np.speakers.isEmpty {
+        let primarySpk = np.speakers.first!
+        out += ANSICode.moveTo(row: metaY + 12, col: metaX)
+        out += "\(ANSICode.dim)Output\(ANSICode.reset)"
+        out += ANSICode.moveTo(row: metaY + 12, col: metaX + labelW)
+        out += truncText(primarySpk.name, to: metaW - labelW)
+
+        var nextMetaRow = metaY + 14
+        if np.speakers.count > 1 {
+            let mixStr = np.speakers.map { "\($0.name) \($0.volume)" }.joined(separator: ", ")
+            out += ANSICode.moveTo(row: nextMetaRow, col: metaX)
+            out += "\(ANSICode.dim)Mix\(ANSICode.reset)"
+            out += ANSICode.moveTo(row: nextMetaRow, col: metaX + labelW)
+            out += "\(ANSICode.dim)\(truncText(mixStr, to: metaW - labelW))\(ANSICode.reset)"
+            nextMetaRow += 2
+        }
+
+        out += ANSICode.moveTo(row: nextMetaRow, col: metaX)
+        out += "\(ANSICode.dim)Volume\(ANSICode.reset)"
+        out += ANSICode.moveTo(row: nextMetaRow, col: metaX + labelW)
+        out += "\(primarySpk.volume)"
+    }
+
+    // Shuffle/repeat indicators
+    var modeStr = ""
+    if np.shuffleEnabled { modeStr += "Shuffle" }
+    if np.repeatMode == "one" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat One" }
+    else if np.repeatMode == "all" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat" }
+    let modeRow = np.speakers.isEmpty ? metaY + 12 : metaY + 18
+    out += ANSICode.moveTo(row: modeRow, col: metaX)
+    out += String(repeating: " ", count: metaW + 4)
+    if !modeStr.isEmpty {
+        out += ANSICode.moveTo(row: modeRow, col: metaX)
+        out += "\(ANSICode.dim)\(modeStr)\(ANSICode.reset)"
+    }
+
+    return out
+}
+
+/// Render "Nothing playing" screen.
+func renderNowPlayingStopped(footer: String) {
+    let frame = ScreenFrame.current()
+    var out = ANSICode.clearScreen + renderShell(title: "Now Playing", status: "", footer: footer)
+    out += ANSICode.moveTo(row: frame.bodyY + 2, col: 3)
+    out += "\(ANSICode.dim)Nothing playing.\(ANSICode.reset)"
+    print(out, terminator: "")
+    fflush(stdout)
+}
+
+/// Drain all pending input from stdin.
+func flushStdin() {
+    var pfd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+    while poll(&pfd, 1, 0) > 0 && pfd.revents & Int16(POLLIN) != 0 {
+        var discard = [UInt8](repeating: 0, count: 256)
+        _ = Darwin.read(STDIN_FILENO, &discard, 256)
+    }
+}
+
+/// Run speaker picker as modal subflow. Returns after user confirms/quits.
+func runSpeakerPickerModal(backend: AppleScriptBackend) {
+    let speakerDevices: [[String: Any]]
+    do {
+        speakerDevices = try fetchSpeakerDevices()
+    } catch {
+        verbose("failed to fetch speakers: \(error.localizedDescription)")
+        return
+    }
+    var volumes = speakerDevices.map { $0["volume"] as! Int }
+    var items = speakerDevices.map {
+        MultiSelectItem(label: $0["name"] as! String, sublabel: "vol: \($0["volume"]!)", selected: $0["selected"] as! Bool)
+    }
+    _ = runMultiSelectList(title: "AirPlay Speakers", items: &items, onToggle: { idx, selected in
+        let name = speakerDevices[idx]["name"] as! String
+        do {
+            _ = try syncRun {
+                try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(name))\" to \(selected)")
+            }
+        } catch {
+            verbose("speaker operation failed: \(error.localizedDescription)")
+        }
+    }, onAdjust: { idx, delta in
+        volumes[idx] = min(100, max(0, volumes[idx] + delta))
+        let name = speakerDevices[idx]["name"] as! String
+        let vol = volumes[idx]
+        do {
+            _ = try syncRun {
+                try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(name))\" to \(vol)")
+            }
+        } catch {
+            verbose("speaker operation failed: \(error.localizedDescription)")
+        }
+        return "vol: \(vol)"
+    })
+}
+
+/// Run volume mixer as modal subflow. Returns after user quits.
+func runVolumeMixerModal(backend: AppleScriptBackend) {
+    let devices: [[String: Any]]
+    do {
+        devices = try fetchSpeakerDevices()
+    } catch {
+        verbose("failed to fetch speakers: \(error.localizedDescription)")
+        return
+    }
+    var speakers = devices.compactMap { d -> MixerSpeaker? in
+        guard d["selected"] as? Bool == true else { return nil }
+        return MixerSpeaker(name: d["name"] as! String, volume: d["volume"] as! Int)
+    }
+    guard !speakers.isEmpty else { return }
+    runVolumeMixer(speakers: &speakers) { name, volume in
+        do {
+            _ = try syncRun {
+                try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(name))\" to \(volume)")
+            }
+        } catch {
+            verbose("speaker operation failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+/// Refresh artwork for current track.
+func refreshNowPlayingArtwork(artW: Int, artY: Int, statusY: Int) -> [String] {
+    let artSize = min(artW, 26, statusY - artY - 2)
+    if let artPath = extractArtwork() {
+        return artworkToAscii(path: artPath, width: artW, height: artSize)
+    }
+    return []
+}
+
 // MARK: - Context-aware Now Playing (used from playlist browser)
 
 func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
@@ -709,15 +908,10 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     defer { terminal.exitRawMode() }
     print(ANSICode.cursorHome + ANSICode.clearScreen, terminator: "")
 
-    // --- Layout ---
-    let artX = 3
-    let artY = 11
-    let artW = 26
-    let metaX = 34
-    let metaY = 11
-    let metaW = 30
-    let timelineX = 80
-    let progBarW = 18
+    let timelineX = NowPlayingLayout.timelineX
+    let metaY = NowPlayingLayout.metaY
+    let artW = NowPlayingLayout.artW
+    let artY = NowPlayingLayout.artY
 
     var artLines: [String] = []
     var lastTrackName = ""
@@ -728,20 +922,20 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     var history: [(track: String, artist: String)] = []
     var queueCursor = context?.startIndex ?? 0
     var queueScroll = 0
-    // Build queue entries from context
     var activePlaylistName = context?.playlistName ?? ""
     var contextTracks: [String] = context?.tracks ?? []
 
     func findCurrentTrackIndex(np: NowPlayingState) -> Int? {
-        // Match by track name in the context track list
+        var substringMatch: Int? = nil
         for (i, track) in contextTracks.enumerated() {
             let parts = track.split(separator: "\u{2014}", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
             let title = parts.first ?? ""
-            if title == np.track || np.track.contains(title) || title.contains(np.track) {
-                return i
+            if title == np.track { return i }
+            if substringMatch == nil && !title.isEmpty && (np.track.contains(title) || title.contains(np.track)) {
+                substringMatch = i
             }
         }
-        return nil
+        return substringMatch
     }
 
     func render(_ np: NowPlayingState) {
@@ -753,83 +947,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
         var out = renderShell(title: titleText, status: "", footer: footerText)
         out += ANSICode.moveTo(row: frame.bodyY + 2, col: 1)
         out += String(repeating: " ", count: frame.width)
-        // --- Cover art ---
-        let artSize = min(artW, 26, frame.statusY - artY - 2)
-        for i in 0..<artSize {
-            if i < artLines.count {
-                out += ANSICode.moveTo(row: artY + i, col: artX)
-                out += "\(artLines[i])\(ANSICode.reset)"
-            }
-        }
-
-        // --- Metadata ---
-        let playIcon = np.state == "playing" ? "\u{25B6}" : "\u{23F8}"
-        let ratingIcon = np.loved ? " \(ANSICode.red)\u{2665}\(ANSICode.reset)\(ANSICode.bold)" : np.disliked ? " \(ANSICode.dim)\u{2193}\(ANSICode.reset)\(ANSICode.bold)" : ""
-        let titlePrefixLen = np.loved || np.disliked ? 4 : 2
-        out += ANSICode.moveTo(row: metaY, col: metaX)
-        out += String(repeating: " ", count: metaW + 4)
-        out += ANSICode.moveTo(row: metaY, col: metaX)
-        out += "\(ANSICode.bold)\(playIcon)\(ratingIcon) \(truncText(np.track, to: metaW - titlePrefixLen))\(ANSICode.reset)"
-
-        out += ANSICode.moveTo(row: metaY + 2, col: metaX)
-        out += String(repeating: " ", count: metaW + 4)
-        out += ANSICode.moveTo(row: metaY + 2, col: metaX)
-        out += truncText(np.artist, to: metaW)
-
-        out += ANSICode.moveTo(row: metaY + 4, col: metaX)
-        out += String(repeating: " ", count: metaW + 4)
-        out += ANSICode.moveTo(row: metaY + 4, col: metaX)
-        out += "\(ANSICode.dim)\(truncText(np.album, to: metaW))\(ANSICode.reset)"
-
-        // Progress bar
-        let elapsed = formatTime(np.position)
-        let total = formatTime(np.duration)
-        let ratio = np.duration > 0 ? Double(np.position) / Double(np.duration) : 0
-        let knobIdx = max(0, min(progBarW - 1, Int(ratio * Double(progBarW - 1))))
-        var barStr = ""
-        for i in 0..<progBarW {
-            barStr += i == knobIdx ? "\(ANSICode.bold)\u{25CF}\(ANSICode.reset)" : "\(ANSICode.dim)\u{2500}\(ANSICode.reset)"
-        }
-        out += ANSICode.moveTo(row: metaY + 8, col: metaX)
-        out += "\(elapsed) \(barStr) \(total)"
-
-        // Output / Volume grid
-        let labelW = 9
-        if !np.speakers.isEmpty {
-            let primarySpk = np.speakers.first!
-            out += ANSICode.moveTo(row: metaY + 12, col: metaX)
-            out += "\(ANSICode.dim)Output\(ANSICode.reset)"
-            out += ANSICode.moveTo(row: metaY + 12, col: metaX + labelW)
-            out += truncText(primarySpk.name, to: metaW - labelW)
-
-            var nextMetaRow = metaY + 14
-            if np.speakers.count > 1 {
-                let mixStr = np.speakers.map { "\($0.name) \($0.volume)" }.joined(separator: ", ")
-                out += ANSICode.moveTo(row: nextMetaRow, col: metaX)
-                out += "\(ANSICode.dim)Mix\(ANSICode.reset)"
-                out += ANSICode.moveTo(row: nextMetaRow, col: metaX + labelW)
-                out += "\(ANSICode.dim)\(truncText(mixStr, to: metaW - labelW))\(ANSICode.reset)"
-                nextMetaRow += 2
-            }
-
-            out += ANSICode.moveTo(row: nextMetaRow, col: metaX)
-            out += "\(ANSICode.dim)Volume\(ANSICode.reset)"
-            out += ANSICode.moveTo(row: nextMetaRow, col: metaX + labelW)
-            out += "\(primarySpk.volume)"
-        }
-
-        // Shuffle/repeat indicators
-        var modeStr = ""
-        if np.shuffleEnabled { modeStr += "Shuffle" }
-        if np.repeatMode == "one" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat One" }
-        else if np.repeatMode == "all" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat" }
-        let modeRow = np.speakers.isEmpty ? metaY + 12 : metaY + 18
-        out += ANSICode.moveTo(row: modeRow, col: metaX)
-        out += String(repeating: " ", count: metaW + 4)
-        if !modeStr.isEmpty {
-            out += ANSICode.moveTo(row: modeRow, col: metaX)
-            out += "\(ANSICode.dim)\(modeStr)\(ANSICode.reset)"
-        }
+        out += renderNowPlayingMetadata(np: np, artLines: artLines, frame: frame)
 
         // --- Timeline pane ---
         if timelineW >= 24 {
@@ -851,27 +969,13 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
         fflush(stdout)
     }
 
-    func renderStopped() {
-        let frame = ScreenFrame.current()
-        let footerText = "\(ANSICode.bold)b\(ANSICode.reset) Back   \(ANSICode.bold)q\(ANSICode.reset) Quit"
-        var out = ANSICode.clearScreen + renderShell(title: "Now Playing", status: "", footer: footerText)
-        out += ANSICode.moveTo(row: frame.bodyY + 2, col: 3)
-        out += "\(ANSICode.dim)Nothing playing.\(ANSICode.reset)"
-        print(out, terminator: "")
-        fflush(stdout)
-    }
+    let contextStoppedFooter = "\(ANSICode.bold)b\(ANSICode.reset) Back   \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
     func refreshArtwork() {
         let frame = ScreenFrame.current()
-        let artSize = min(artW, 26, frame.statusY - artY - 2)
-        if let artPath = extractArtwork() {
-            artLines = artworkToAscii(path: artPath, width: artW, height: artSize)
-        } else {
-            artLines = []
-        }
+        artLines = refreshNowPlayingArtwork(artW: artW, artY: artY, statusY: frame.statusY)
     }
 
-    // Redraw only the timeline pane (no AppleScript poll)
     func refreshTimelineOnly() {
         let frame = ScreenFrame.current()
         let timelineW = frame.width - timelineX - 3
@@ -899,18 +1003,9 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
         fflush(stdout)
     }
 
-    // Drain all pending input from stdin
-    func flushStdin() {
-        var pfd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
-        while poll(&pfd, 1, 0) > 0 && pfd.revents & Int16(POLLIN) != 0 {
-            var discard = [UInt8](repeating: 0, count: 256)
-            _ = Darwin.read(STDIN_FILENO, &discard, 256)
-        }
-    }
-
     // Initial render
     let backend = AppleScriptBackend()
-    if let np = pollNowPlaying() {
+    if let np = pollNowPlaying(backend: backend) {
         lastTrackName = np.track
         lastArtistName = np.artist
         lastShuffleEnabled = np.shuffleEnabled
@@ -921,7 +1016,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
         }
         render(np)
     } else {
-        renderStopped()
+        renderNowPlayingStopped(footer: contextStoppedFooter)
     }
 
     while true {
@@ -973,6 +1068,12 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
                     """)
                 }
             case .char("r"):
+                let frame = ScreenFrame.current()
+                var loadingOut = ANSICode.moveTo(row: frame.statusY, col: 3)
+                loadingOut += ANSICode.clearLine
+                loadingOut += "\(ANSICode.yellow)Building radio station…\(ANSICode.reset)"
+                print(loadingOut, terminator: "")
+                fflush(stdout)
                 if let radioContext = startRadioStation() {
                     activePlaylistName = radioContext.playlistName
                     contextTracks = radioContext.tracks
@@ -1007,71 +1108,12 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
             case .char("-"):
                 _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume - 5)") }
             case .char("s"):
-                // Speaker picker as modal subflow
                 terminal.exitRawMode()
-                let speakerDevices: [[String: Any]]
-                do {
-                    speakerDevices = try fetchSpeakerDevices()
-                } catch {
-                    verbose("failed to fetch speakers: \(error.localizedDescription)")
-                    terminal.enterRawMode()
-                    continue
-                }
-                do {
-                    var volumes = speakerDevices.map { $0["volume"] as! Int }
-                    var items = speakerDevices.map {
-                        MultiSelectItem(label: $0["name"] as! String, sublabel: "vol: \($0["volume"]!)", selected: $0["selected"] as! Bool)
-                    }
-                    _ = runMultiSelectList(title: "AirPlay Speakers", items: &items, onToggle: { idx, selected in
-                        let name = speakerDevices[idx]["name"] as! String
-                        do {
-                            _ = try syncRun {
-                                try await backend.runMusic("set selected of AirPlay device \"\(name)\" to \(selected)")
-                            }
-                        } catch {
-                            verbose("speaker operation failed: \(error.localizedDescription)")
-                        }
-                    }, onAdjust: { idx, delta in
-                        volumes[idx] = min(100, max(0, volumes[idx] + delta))
-                        let name = speakerDevices[idx]["name"] as! String
-                        let vol = volumes[idx]
-                        do {
-                            _ = try syncRun {
-                                try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(vol)")
-                            }
-                        } catch {
-                            verbose("speaker operation failed: \(error.localizedDescription)")
-                        }
-                        return "vol: \(vol)"
-                    })
-                }
+                runSpeakerPickerModal(backend: backend)
                 terminal.enterRawMode()
             case .char("v"):
-                // Volume mixer as modal subflow
                 terminal.exitRawMode()
-                let volDevices: [[String: Any]]
-                do {
-                    volDevices = try fetchSpeakerDevices()
-                } catch {
-                    verbose("failed to fetch speakers: \(error.localizedDescription)")
-                    terminal.enterRawMode()
-                    continue
-                }
-                var speakers = volDevices.compactMap { d -> MixerSpeaker? in
-                    guard d["selected"] as? Bool == true else { return nil }
-                    return MixerSpeaker(name: d["name"] as! String, volume: d["volume"] as! Int)
-                }
-                if !speakers.isEmpty {
-                    runVolumeMixer(speakers: &speakers) { name, volume in
-                        do {
-                            _ = try syncRun {
-                                try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(volume)")
-                            }
-                        } catch {
-                            verbose("speaker operation failed: \(error.localizedDescription)")
-                        }
-                    }
-                }
+                runVolumeMixerModal(backend: backend)
                 terminal.enterRawMode()
             case .char("b"), .escape:
                 return .back
@@ -1083,13 +1125,15 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
         }
 
         // Re-poll and render
-        if let np = pollNowPlaying() {
+        if let np = pollNowPlaying(backend: backend) {
             stoppedPolls = 0
             lastShuffleEnabled = np.shuffleEnabled
             if np.track != lastTrackName {
                 if !lastTrackName.isEmpty {
-                    history.insert((track: lastTrackName, artist: lastArtistName), at: 0)
-                    if history.count > 20 { history.removeLast() }
+                    if history.first.map({ $0.track != lastTrackName || $0.artist != lastArtistName }) ?? true {
+                        history.insert((track: lastTrackName, artist: lastArtistName), at: 0)
+                        if history.count > 20 { history.removeLast() }
+                    }
                 }
                 lastTrackName = np.track
                 lastArtistName = np.artist
@@ -1122,7 +1166,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
             if !lastTrackName.isEmpty && stoppedPolls < 4 {
                 continue
             }
-            renderStopped()
+            renderNowPlayingStopped(footer: contextStoppedFooter)
         }
     }
 }
@@ -1135,15 +1179,11 @@ func runNowPlayingTUI() {
     defer { terminal.exitRawMode() }
     print(ANSICode.cursorHome + ANSICode.clearScreen, terminator: "")
 
-    // --- Layout ---
-    let artX = 3
-    let artY = 11
-    let artW = 26
-    let metaX = 34
-    let metaY = 11
-    let metaW = 30
-    let timelineX = 80
-    let progBarW = 18
+    let timelineX = NowPlayingLayout.timelineX
+    let metaY = NowPlayingLayout.metaY
+    let artW = NowPlayingLayout.artW
+    let artY = NowPlayingLayout.artY
+    let standaloneStoppedFooter = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
     var surroundingTracks: [TrackListEntry] = []
     var artLines: [String] = []
@@ -1162,83 +1202,7 @@ func runNowPlayingTUI() {
         let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑↓\(ANSICode.reset) Album  \(ANSICode.bold)Enter\(ANSICode.reset) Play  \(ANSICode.bold)←→\(ANSICode.reset) Seek  \(ANSICode.bold)Space\(ANSICode.reset) \u{23EF}  \(ANSICode.bold)r\(ANSICode.reset) Radio  \(ANSICode.bold)s\(ANSICode.reset) Spk  \(ANSICode.bold)v\(ANSICode.reset) Mix  \(ANSICode.bold)+-\(ANSICode.reset) Vol  \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
         var out = renderShell(title: "\u{266B} Now Playing", status: "", footer: footerText)
-        // --- Cover art ---
-        let artSize = min(artW, 26, frame.statusY - artY - 2)
-        for i in 0..<artSize {
-            if i < artLines.count {
-                out += ANSICode.moveTo(row: artY + i, col: artX)
-                out += "\(artLines[i])\(ANSICode.reset)"
-            }
-        }
-
-        // --- Metadata ---
-        let playIcon = np.state == "playing" ? "\u{25B6}" : "\u{23F8}"
-        let ratingIcon = np.loved ? " \(ANSICode.red)\u{2665}\(ANSICode.reset)\(ANSICode.bold)" : np.disliked ? " \(ANSICode.dim)\u{2193}\(ANSICode.reset)\(ANSICode.bold)" : ""
-        let titlePrefixLen = np.loved || np.disliked ? 4 : 2
-        out += ANSICode.moveTo(row: metaY, col: metaX)
-        out += String(repeating: " ", count: metaW + 4)
-        out += ANSICode.moveTo(row: metaY, col: metaX)
-        out += "\(ANSICode.bold)\(playIcon)\(ratingIcon) \(truncText(np.track, to: metaW - titlePrefixLen))\(ANSICode.reset)"
-
-        out += ANSICode.moveTo(row: metaY + 2, col: metaX)
-        out += String(repeating: " ", count: metaW + 4)
-        out += ANSICode.moveTo(row: metaY + 2, col: metaX)
-        out += truncText(np.artist, to: metaW)
-
-        out += ANSICode.moveTo(row: metaY + 4, col: metaX)
-        out += String(repeating: " ", count: metaW + 4)
-        out += ANSICode.moveTo(row: metaY + 4, col: metaX)
-        out += "\(ANSICode.dim)\(truncText(np.album, to: metaW))\(ANSICode.reset)"
-
-        // Progress bar
-        let elapsed = formatTime(np.position)
-        let total = formatTime(np.duration)
-        let ratio = np.duration > 0 ? Double(np.position) / Double(np.duration) : 0
-        let knobIdx = max(0, min(progBarW - 1, Int(ratio * Double(progBarW - 1))))
-        var barStr = ""
-        for i in 0..<progBarW {
-            barStr += i == knobIdx ? "\(ANSICode.bold)\u{25CF}\(ANSICode.reset)" : "\(ANSICode.dim)\u{2500}\(ANSICode.reset)"
-        }
-        out += ANSICode.moveTo(row: metaY + 8, col: metaX)
-        out += "\(elapsed) \(barStr) \(total)"
-
-        // Output / Volume grid
-        let labelW = 9
-        if !np.speakers.isEmpty {
-            let primarySpk = np.speakers.first!
-            out += ANSICode.moveTo(row: metaY + 12, col: metaX)
-            out += "\(ANSICode.dim)Output\(ANSICode.reset)"
-            out += ANSICode.moveTo(row: metaY + 12, col: metaX + labelW)
-            out += truncText(primarySpk.name, to: metaW - labelW)
-
-            var nextMetaRow = metaY + 14
-            if np.speakers.count > 1 {
-                let mixStr = np.speakers.map { "\($0.name) \($0.volume)" }.joined(separator: ", ")
-                out += ANSICode.moveTo(row: nextMetaRow, col: metaX)
-                out += "\(ANSICode.dim)Mix\(ANSICode.reset)"
-                out += ANSICode.moveTo(row: nextMetaRow, col: metaX + labelW)
-                out += "\(ANSICode.dim)\(truncText(mixStr, to: metaW - labelW))\(ANSICode.reset)"
-                nextMetaRow += 2
-            }
-
-            out += ANSICode.moveTo(row: nextMetaRow, col: metaX)
-            out += "\(ANSICode.dim)Volume\(ANSICode.reset)"
-            out += ANSICode.moveTo(row: nextMetaRow, col: metaX + labelW)
-            out += "\(primarySpk.volume)"
-        }
-
-        // Shuffle/repeat indicators
-        var modeStr = ""
-        if np.shuffleEnabled { modeStr += "Shuffle" }
-        if np.repeatMode == "one" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat One" }
-        else if np.repeatMode == "all" { modeStr += (modeStr.isEmpty ? "" : "  ") + "Repeat" }
-        let modeRow = np.speakers.isEmpty ? metaY + 12 : metaY + 18
-        out += ANSICode.moveTo(row: modeRow, col: metaX)
-        out += String(repeating: " ", count: metaW + 4)
-        if !modeStr.isEmpty {
-            out += ANSICode.moveTo(row: modeRow, col: metaX)
-            out += "\(ANSICode.dim)\(modeStr)\(ANSICode.reset)"
-        }
+        out += renderNowPlayingMetadata(np: np, artLines: artLines, frame: frame)
 
         // --- Timeline pane ---
         if timelineW >= 24 {
@@ -1259,25 +1223,10 @@ func runNowPlayingTUI() {
         fflush(stdout)
     }
 
-    func renderStopped() {
-        let frame = ScreenFrame.current()
-        let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)q\(ANSICode.reset) Quit"
-        var out = ANSICode.clearScreen + renderShell(title: "Now Playing", status: "", footer: footerText)
-        out += ANSICode.moveTo(row: frame.bodyY + 2, col: 3)
-        out += "\(ANSICode.dim)Nothing playing.\(ANSICode.reset)"
-        print(out, terminator: "")
-        fflush(stdout)
-    }
-
     func refreshTrackContext(_ np: NowPlayingState) {
-        surroundingTracks = pollAlbumTracks(for: np)
+        surroundingTracks = pollAlbumTracks(for: np, backend: backend)
         let frame = ScreenFrame.current()
-        let artSize = min(artW, 26, frame.statusY - artY - 2)
-        if let artPath = extractArtwork() {
-            artLines = artworkToAscii(path: artPath, width: artW, height: artSize)
-        } else {
-            artLines = []
-        }
+        artLines = refreshNowPlayingArtwork(artW: artW, artY: artY, statusY: frame.statusY)
     }
 
     // Redraw only the timeline pane (no AppleScript poll)
@@ -1307,18 +1256,9 @@ func runNowPlayingTUI() {
         fflush(stdout)
     }
 
-    // Drain all pending input from stdin
-    func flushStdin() {
-        var pfd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
-        while poll(&pfd, 1, 0) > 0 && pfd.revents & Int16(POLLIN) != 0 {
-            var discard = [UInt8](repeating: 0, count: 256)
-            _ = Darwin.read(STDIN_FILENO, &discard, 256)
-        }
-    }
-
     // Initial render
     let backend = AppleScriptBackend()
-    if let np = pollNowPlaying() {
+    if let np = pollNowPlaying(backend: backend) {
         lastTrackName = np.track
         lastArtistName = np.artist
         lastPosition = np.position
@@ -1329,7 +1269,7 @@ func runNowPlayingTUI() {
         timelineCursor = rows.firstIndex(where: { $0.isCurrent }) ?? 0
         render(np)
     } else {
-        renderStopped()
+        renderNowPlayingStopped(footer: standaloneStoppedFooter)
     }
 
     while true {
@@ -1368,6 +1308,12 @@ func runNowPlayingTUI() {
             case .space:
                 _ = try? syncRun { try await backend.runMusic("playpause") }
             case .char("r"):
+                let frame2 = ScreenFrame.current()
+                var loadingOut2 = ANSICode.moveTo(row: frame2.statusY, col: 3)
+                loadingOut2 += ANSICode.clearLine
+                loadingOut2 += "\(ANSICode.yellow)Building radio station…\(ANSICode.reset)"
+                print(loadingOut2, terminator: "")
+                fflush(stdout)
                 if let radioContext = startRadioStation() {
                     terminal.exitRawMode()
                     _ = runNowPlayingWithContext(radioContext)
@@ -1388,70 +1334,12 @@ func runNowPlayingTUI() {
             case .char("-"):
                 _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume - 5)") }
             case .char("s"):
-                // Speaker picker as modal subflow
                 terminal.exitRawMode()
-                let spkDevices2: [[String: Any]]
-                do {
-                    spkDevices2 = try fetchSpeakerDevices()
-                } catch {
-                    verbose("failed to fetch speakers: \(error.localizedDescription)")
-                    terminal.enterRawMode()
-                    continue
-                }
-                do {
-                    var volumes = spkDevices2.map { $0["volume"] as! Int }
-                    var items = spkDevices2.map {
-                        MultiSelectItem(label: $0["name"] as! String, sublabel: "vol: \($0["volume"]!)", selected: $0["selected"] as! Bool)
-                    }
-                    _ = runMultiSelectList(title: "AirPlay Speakers", items: &items, onToggle: { idx, selected in
-                        let name = spkDevices2[idx]["name"] as! String
-                        do {
-                            _ = try syncRun {
-                                try await backend.runMusic("set selected of AirPlay device \"\(name)\" to \(selected)")
-                            }
-                        } catch {
-                            verbose("speaker operation failed: \(error.localizedDescription)")
-                        }
-                    }, onAdjust: { idx, delta in
-                        volumes[idx] = min(100, max(0, volumes[idx] + delta))
-                        let name = spkDevices2[idx]["name"] as! String
-                        let vol = volumes[idx]
-                        do {
-                            _ = try syncRun {
-                                try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(vol)")
-                            }
-                        } catch {
-                            verbose("speaker operation failed: \(error.localizedDescription)")
-                        }
-                        return "vol: \(vol)"
-                    })
-                }
+                runSpeakerPickerModal(backend: backend)
                 terminal.enterRawMode()
             case .char("v"):
                 terminal.exitRawMode()
-                let volDevices2: [[String: Any]]
-                do {
-                    volDevices2 = try fetchSpeakerDevices()
-                } catch {
-                    verbose("failed to fetch speakers: \(error.localizedDescription)")
-                    terminal.enterRawMode()
-                    continue
-                }
-                var speakers = volDevices2.compactMap { d -> MixerSpeaker? in
-                    guard d["selected"] as? Bool == true else { return nil }
-                    return MixerSpeaker(name: d["name"] as! String, volume: d["volume"] as! Int)
-                }
-                if !speakers.isEmpty {
-                    runVolumeMixer(speakers: &speakers) { name, volume in
-                        do {
-                            _ = try syncRun {
-                                try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(volume)")
-                            }
-                        } catch {
-                            verbose("speaker operation failed: \(error.localizedDescription)")
-                        }
-                    }
-                }
+                runVolumeMixerModal(backend: backend)
                 terminal.enterRawMode()
             case .char("q"), .escape:
                 return
@@ -1461,14 +1349,16 @@ func runNowPlayingTUI() {
         }
 
         // Re-poll and render
-        if let np = pollNowPlaying() {
+        if let np = pollNowPlaying(backend: backend) {
             stoppedPolls = 0
             lastPosition = np.position
             lastDuration = np.duration
             if np.track != lastTrackName {
                 if !lastTrackName.isEmpty {
-                    history.insert((track: lastTrackName, artist: lastArtistName), at: 0)
-                    if history.count > 20 { history.removeLast() }
+                    if history.first.map({ $0.track != lastTrackName || $0.artist != lastArtistName }) ?? true {
+                        history.insert((track: lastTrackName, artist: lastArtistName), at: 0)
+                        if history.count > 20 { history.removeLast() }
+                    }
                 }
                 lastTrackName = np.track
                 lastArtistName = np.artist
@@ -1493,7 +1383,7 @@ func runNowPlayingTUI() {
             if !lastTrackName.isEmpty && stoppedPolls < 4 {
                 continue
             }
-            renderStopped()
+            renderNowPlayingStopped(footer: standaloneStoppedFooter)
         }
     }
 }

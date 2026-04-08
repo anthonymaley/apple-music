@@ -55,7 +55,9 @@ enum KeyPress {
                 case 0x44: return .left
                 case 0x31...0x39:
                     var sequence = String(UnicodeScalar(seq2))
-                    while let next = readByte() {
+                    var bytesRead = 0
+                    while bytesRead < 8, let next = readByte() {
+                        bytesRead += 1
                         sequence.append(Character(UnicodeScalar(next)))
                         if next == 0x7E || (next >= 0x40 && next <= 0x7E) {
                             break
@@ -95,6 +97,9 @@ enum KeyPress {
     }
 }
 
+/// Global flag set by SIGWINCH handler — check and reset in render loops.
+var terminalResized = false
+
 class TerminalState {
     private var originalTermios: termios?
     private var isRaw = false
@@ -121,6 +126,9 @@ class TerminalState {
             TerminalState.shared.exitRawMode()
             exit(0)
         }
+        signal(SIGWINCH) { _ in
+            terminalResized = true
+        }
     }
 
     func exitRawMode() {
@@ -130,6 +138,7 @@ class TerminalState {
         print(ANSICode.showCursor + ANSICode.altScreenOff, terminator: "")
         fflush(stdout)
         signal(SIGINT, SIG_DFL)
+        signal(SIGWINCH, SIG_DFL)
     }
 }
 

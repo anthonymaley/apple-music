@@ -17,6 +17,7 @@ func runVolumeMixer(
     defer { terminal.exitRawMode() }
 
     var cursor = 0
+    var scrollOffset = 0
     var digitBuffer = ""
 
     let listX = 3
@@ -26,15 +27,22 @@ func runVolumeMixer(
 
     func render() {
         let frame = ScreenFrame.current()
+        let maxVisible = max(1, frame.statusY - frame.bodyY - 5)
         let activeCount = speakers.filter { $0.volume > 0 }.count
         let statusText = "\(activeCount) active output\(activeCount == 1 ? "" : "s")"
         let footerText = "\(ANSICode.dim)Controls\(ANSICode.reset)  \(ANSICode.bold)↑↓\(ANSICode.reset) Speaker   \(ANSICode.bold)←→\(ANSICode.reset) Adjust 5%   \(ANSICode.bold)0-9\(ANSICode.reset) Quick Set   \(ANSICode.bold)q\(ANSICode.reset) Quit"
 
+        // Adjust scroll offset
+        if cursor < scrollOffset { scrollOffset = cursor }
+        if cursor >= scrollOffset + maxVisible { scrollOffset = cursor - maxVisible + 1 }
+
+        let visibleEnd = min(speakers.count, scrollOffset + maxVisible)
         var out = renderShell(title: "Volume Mixer", status: statusText, footer: footerText)
 
         // Left pane: speaker list
-        for (i, spk) in speakers.enumerated() {
-            let row = frame.bodyY + 2 + i
+        for i in scrollOffset..<visibleEnd {
+            let spk = speakers[i]
+            let row = frame.bodyY + 2 + (i - scrollOffset)
             out += ANSICode.moveTo(row: row, col: listX)
             let pointer = i == cursor ? "\(ANSICode.cyan)▶\(ANSICode.reset)" : " "
             let name = truncText(spk.name, to: 26)
@@ -51,8 +59,9 @@ func runVolumeMixer(
         out += ANSICode.moveTo(row: frame.bodyY + 1, col: levelsX)
         out += "\(ANSICode.dim)\(String(repeating: "─", count: 10))\(ANSICode.reset)"
 
-        for (i, spk) in speakers.enumerated() {
-            let row = frame.bodyY + 3 + i
+        for i in scrollOffset..<visibleEnd {
+            let spk = speakers[i]
+            let row = frame.bodyY + 3 + (i - scrollOffset)
             let active = i == cursor
             out += ANSICode.moveTo(row: row, col: levelsX)
 
