@@ -20,6 +20,9 @@ struct ANSICode {
     static let green = "\u{1B}[32m"
     static let cyan = "\u{1B}[36m"
     static let yellow = "\u{1B}[33m"
+    static let brightWhite = "\u{1B}[97m"
+    static let lime = "\u{1B}[92m"
+    static let amber = "\u{1B}[38;2;255;176;0m"
 
     static func moveTo(row: Int, col: Int) -> String {
         "\u{1B}[\(row);\(col)H"
