@@ -62,6 +62,8 @@ func runPlaylistBrowser(
     var fullCache: [Int: PlaylistPreview] = [:]
     var previewLines: [Int: [String]] = [:]
     var lastLoadedPl = -1
+    var filterText = ""
+    var filtering = false
 
     func currentState() -> BrowserState {
         BrowserState(plCursor: plCursor, plScroll: plScroll,
@@ -96,13 +98,33 @@ func runPlaylistBrowser(
         }
     }
 
+    func visibleIndices() -> [Int] {
+        guard !filterText.isEmpty else { return Array(0..<meta.count) }
+        let q = filterText.lowercased()
+        return (0..<meta.count).filter { meta[$0].name.lowercased().contains(q) }
+    }
+
+    func clampCursorToFilter() {
+        let vis = visibleIndices()
+        if !vis.contains(plCursor) { plCursor = vis.first ?? 0 }
+        plScroll = 0
+    }
+
     func renderRail(_ z: PlaylistZones, into out: inout String, listY: Int, maxVisible: Int) {
-        if plCursor < plScroll { plScroll = plCursor }
-        if plCursor >= plScroll + maxVisible { plScroll = plCursor - maxVisible + 1 }
-        let end = min(meta.count, plScroll + maxVisible)
+        let vis = visibleIndices()
+        if vis.isEmpty {
+            out += ANSICode.moveTo(row: listY, col: z.railX)
+            out += "\(ANSICode.dim)(no matches)\(ANSICode.reset)"
+            return
+        }
+        let pos = vis.firstIndex(of: plCursor) ?? 0
+        if pos < plScroll { plScroll = pos }
+        if pos >= plScroll + maxVisible { plScroll = pos - maxVisible + 1 }
+        let end = min(vis.count, plScroll + maxVisible)
         let nameWidth = z.railWidth - 2 - metaCol - 1
-        for i in plScroll..<end {
-            let row = listY + (i - plScroll)
+        for p in plScroll..<end {
+            let i = vis[p]
+            let row = listY + (p - plScroll)
             out += ANSICode.moveTo(row: row, col: z.railX)
             let m = meta[i]
             let display = m.name.hasPrefix("__radio__")
@@ -223,6 +245,10 @@ func runPlaylistBrowser(
         renderRail(z, into: &out, listY: listY, maxVisible: maxVisible)
         renderHero(z, into: &out)
         renderPreview(z, into: &out)
+        if filtering || !filterText.isEmpty {
+            out += ANSICode.moveTo(row: frame.bodyY, col: z.railX)
+            out += "\(ANSICode.cyan)/\(ANSICode.reset) \(ANSICode.brightWhite)\(filterText)\(ANSICode.reset)\(filtering ? "\u{2588}" : "")"
+        }
         print(out, terminator: "")
         fflush(stdout)
     }
@@ -266,20 +292,43 @@ func runPlaylistBrowser(
 
         let trackCount = fullCache[plCursor]?.tracks.count ?? 0
 
+        if filtering {
+            switch key {
+            case .enter:
+                filtering = false
+            case .escape:
+                filtering = false; filterText = ""; clampCursorToFilter()
+            case .char(let c) where c == "\u{7F}" || c == "\u{8}":
+                if !filterText.isEmpty { filterText.removeLast() }
+                clampCursorToFilter()
+            case .char(let c):
+                filterText.append(c); clampCursorToFilter()
+            default:
+                break
+            }
+            render()
+            continue
+        }
+
         switch key {
         case .up:
             if focus == .playlists {
-                plCursor = max(0, plCursor - 1)
+                let vis = visibleIndices()
+                if let pos = vis.firstIndex(of: plCursor), pos > 0 { plCursor = vis[pos - 1] }
             } else {
                 trCursor = max(0, trCursor - 1)
             }
 
         case .down:
             if focus == .playlists {
-                plCursor = min(playlists.count - 1, plCursor + 1)
+                let vis = visibleIndices()
+                if let pos = vis.firstIndex(of: plCursor), pos < vis.count - 1 { plCursor = vis[pos + 1] }
             } else {
                 trCursor = min(trackCount - 1, trCursor + 1)
             }
+
+        case .char("/"):
+            filtering = true
 
         case .char("\t"):  // Tab — activate and switch focus
             if focus == .playlists {
