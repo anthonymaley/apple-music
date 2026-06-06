@@ -218,7 +218,7 @@ func runPlaylistBrowser(
                 for (i, line) in lines.prefix(8).enumerated() {
                     out += ANSICode.moveTo(row: y, col: rx)
                     let idx = String(format: "%02d", i + 1)
-                    out += "\(ANSICode.dim)\(idx)\(ANSICode.reset)  \(truncText(line, to: z.rightWidth - 4))"
+                    out += "\(ANSICode.dim)\(idx)\(ANSICode.reset)  \(truncText(line, to: max(2, z.rightWidth - 4)))"
                     y += 1
                 }
             }
@@ -246,7 +246,7 @@ func runPlaylistBrowser(
         for i in trScroll..<end {
             out += ANSICode.moveTo(row: y, col: rx)
             let idx = String(format: "%02d", i + 1)
-            let text = truncText(tracks[i], to: z.rightWidth - 4)
+            let text = truncText(tracks[i], to: max(2, z.rightWidth - 4))
             if i == trCursor {
                 out += "\(ANSICode.cyan)\u{25B6}\(ANSICode.reset) \(ANSICode.brightWhite)\(idx) \(text)\(ANSICode.reset)"
             } else {
@@ -291,9 +291,13 @@ func runPlaylistBrowser(
         let frame = ScreenFrame.current()
         let listY = frame.bodyY + 2
         let maxVisible = max(1, frame.statusY - listY - 1)
-        let visible = plScroll..<min(meta.count, plScroll + maxVisible)
+        // Real playlist indices currently on screen (respects an active filter:
+        // plScroll is a position into the filtered list, not an absolute index).
+        let vis = visibleIndices()
+        let start = max(0, min(plScroll, vis.count))
+        let onScreen = Array(vis[start..<min(vis.count, start + maxVisible)])
         let batch = nextEnrichmentBatch(total: meta.count, loaded: loaded,
-                                        visible: visible, batchSize: enrichBatch)
+                                        visible: onScreen, batchSize: enrichBatch)
         guard !batch.isEmpty else { return }
         let fetched = onMeta(batch)
         for idx in batch {
@@ -312,10 +316,14 @@ func runPlaylistBrowser(
 
     while true {
         let pending = loaded.count < meta.count
-        let previewPending = previewLines[plCursor] == nil
+        // Only fetch a preview when it will actually be shown: playlist focus,
+        // three-zone width. Avoids blocking fetches for a hidden pane.
+        let showsPreview = focus == .playlists
+            && playlistZones(width: ScreenFrame.current().width).mode == .three
+        let previewPending = showsPreview && previewLines[plCursor] == nil
         guard let key = KeyPress.read(timeout: (pending || previewPending) ? 0.15 : 60.0) else {
             if pending { enrichTick() }
-            if previewLines[plCursor] == nil {
+            if previewPending {
                 previewLines[plCursor] = onPreview(plCursor) ?? []
             }
             render()

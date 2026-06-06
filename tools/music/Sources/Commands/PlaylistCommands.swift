@@ -57,19 +57,25 @@ struct PlaylistBrowse: ParsableCommand {
         let onTracks: (Int) -> PlaylistPreview? = { idx in
             if let cached = trackCache[idx] { return cached }
             let plName = names[idx]
-            let escapedPlName = plName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedPlName = escapeAppleScriptString(plName)
+            // Fetch names/artists as bulk lists (`tracks 1 thru n`) and join them
+            // in-memory. The old `repeat with t in (every track ...)` paid a
+            // per-element Apple Event round-trip for every name/artist — ~3.8s
+            // on a 13k-track playlist; this bulk form is ~0.2s.
             guard let trackResult = try? syncRun({
                 try await backend.runMusic("""
-                    set trackList to every track of playlist "\(escapedPlName)"
+                    set total to count of tracks of playlist "\(escapedPlName)"
+                    set n to total
+                    if n > 200 then set n to 200
                     set output to ""
-                    set i to 1
-                    set total to count of trackList
-                    repeat with t in trackList
-                        if i > 200 then exit repeat
-                        if output is not "" then set output to output & linefeed
-                        set output to output & name of t & " — " & artist of t
-                        set i to i + 1
-                    end repeat
+                    if n > 0 then
+                        set ns to name of tracks 1 thru n of playlist "\(escapedPlName)"
+                        set ars to artist of tracks 1 thru n of playlist "\(escapedPlName)"
+                        repeat with i from 1 to n
+                            if output is not "" then set output to output & linefeed
+                            set output to output & (item i of ns) & " — " & (item i of ars)
+                        end repeat
+                    end if
                     return (total as text) & "|" & output
                 """)
             }) else { return nil }
@@ -77,7 +83,7 @@ struct PlaylistBrowse: ParsableCommand {
             let parts = trimmed.split(separator: "|", maxSplits: 1)
             let count = Int(parts.first ?? "0") ?? 0
             let trackLines = parts.count > 1
-                ? String(parts[1]).components(separatedBy: "\n")
+                ? String(parts[1]).components(separatedBy: "\n").filter { !$0.isEmpty }
                 : []
             let preview = PlaylistPreview(name: plName, trackCount: count, tracks: trackLines)
             trackCache[idx] = preview
@@ -124,14 +130,18 @@ struct PlaylistBrowse: ParsableCommand {
             let esc = escapeAppleScriptString(names[idx])
             guard let res = try? syncRun({
                 try await backend.runMusic("""
+                    set total to count of tracks of playlist "\(esc)"
+                    set n to total
+                    if n > 8 then set n to 8
                     set output to ""
-                    set i to 1
-                    repeat with t in (every track of playlist "\(esc)")
-                        if i > 8 then exit repeat
-                        if output is not "" then set output to output & linefeed
-                        set output to output & name of t & " \u{2014} " & artist of t
-                        set i to i + 1
-                    end repeat
+                    if n > 0 then
+                        set ns to name of tracks 1 thru n of playlist "\(esc)"
+                        set ars to artist of tracks 1 thru n of playlist "\(esc)"
+                        repeat with i from 1 to n
+                            if output is not "" then set output to output & linefeed
+                            set output to output & (item i of ns) & " \u{2014} " & (item i of ars)
+                        end repeat
+                    end if
                     return output
                 """)
             }) else { return nil }
