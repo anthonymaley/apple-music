@@ -45,18 +45,6 @@ struct RESTAPIBackend {
         return (data, (response as! HTTPURLResponse).statusCode)
     }
 
-    func delete(_ path: String) async throws -> (Data, Int) {
-        let url = URL(string: "https://api.music.apple.com\(path)")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
-        request.setValue("Bearer \(developerToken)", forHTTPHeaderField: "Authorization")
-        if let userToken = userToken {
-            request.setValue(userToken, forHTTPHeaderField: "Music-User-Token")
-        }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        return (data, (response as! HTTPURLResponse).statusCode)
-    }
-
     // MARK: - Catalog Search
 
     func searchSongs(query: String, limit: Int = 10) async throws -> [CatalogSong] {

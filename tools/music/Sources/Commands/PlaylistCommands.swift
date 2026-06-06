@@ -57,7 +57,7 @@ struct PlaylistBrowse: ParsableCommand {
         let onTracks: (Int) -> PlaylistPreview? = { idx in
             if let cached = trackCache[idx] { return cached }
             let plName = names[idx]
-            let escapedPlName = plName.replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedPlName = plName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             guard let trackResult = try? syncRun({
                 try await backend.runMusic("""
                     set trackList to every track of playlist "\(escapedPlName)"
@@ -97,7 +97,7 @@ struct PlaylistBrowse: ParsableCommand {
             case .playTrack(let plIdx, let trIdx, let ctx, let state):
                 browserState = state
                 let plName = names[plIdx]
-                let escapedPlName2 = plName.replacingOccurrences(of: "\"", with: "\\\"")
+                let escapedPlName2 = plName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
                 _ = try syncRun {
                     try await backend.runMusic("play track \(trIdx + 1) of playlist \"\(escapedPlName2)\"")
                 }
@@ -107,7 +107,7 @@ struct PlaylistBrowse: ParsableCommand {
 
             case .playPlaylist(let idx, let ctx, let state):
                 browserState = state
-                let plName = names[idx].replacingOccurrences(of: "\"", with: "\\\"")
+                let plName = names[idx].replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
                 _ = try syncRun { try await backend.runMusic("set shuffle enabled to false") }
                 _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
                 let npResult = runNowPlayingWithContext(ctx)
@@ -115,7 +115,7 @@ struct PlaylistBrowse: ParsableCommand {
 
             case .shufflePlaylist(let idx, let ctx, let state):
                 browserState = state
-                let plName = names[idx].replacingOccurrences(of: "\"", with: "\\\"")
+                let plName = names[idx].replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
                 _ = try syncRun { try await backend.runMusic("set shuffle enabled to true") }
                 _ = try syncRun { try await backend.runMusic("play playlist \"\(plName)\"") }
                 let npResult = runNowPlayingWithContext(ctx)
@@ -252,7 +252,7 @@ func showPlaylistTracks(name: String, json: Bool) throws {
     let backend = AppleScriptBackend()
     let result = try syncRun {
         try await backend.runMusic("""
-            set trackList to every track of playlist "\(name)"
+            set trackList to every track of playlist "\(escapeAppleScriptString(name))"
             set output to ""
             set i to 1
             repeat with t in trackList
@@ -332,8 +332,8 @@ struct PlaylistCreate: ParsableCommand {
             var count = 0
             for idx in indices {
                 if let song = try? cache.lookupSong(index: idx) {
-                    let et = song.title.replacingOccurrences(of: "\"", with: "\\\"")
-                    let ea = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
+                    let et = song.title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                    let ea = song.artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
                     _ = try? syncRun {
                         try await backend.runMusic("""
                             set results to (every track of playlist "Library" whose name is "\(et)" and artist is "\(ea)")
@@ -341,7 +341,7 @@ struct PlaylistCreate: ParsableCommand {
                                 set results to (every track of playlist "Library" whose name contains "\(et)" and artist contains "\(ea)")
                             end if
                             if (count of results) > 0 then
-                                duplicate item 1 of results to playlist "\(name)"
+                                duplicate item 1 of results to playlist "\(escapeAppleScriptString(name))"
                             end if
                         """)
                     }
@@ -363,8 +363,9 @@ struct PlaylistDelete: ParsableCommand {
     @Argument(help: "Playlist name") var name: String
     func run() throws {
         let backend = AppleScriptBackend()
+        let escName = escapeAppleScriptString(name)
         _ = try syncRun {
-            try await backend.runMusic("delete playlist \"\(name)\"")
+            try await backend.runMusic("delete playlist \"\(escName)\"")
         }
         print("Deleted playlist '\(name)'.")
     }
@@ -402,8 +403,8 @@ struct PlaylistAdd: ParsableCommand {
                 let total = songs.count
                 var count = 0
                 for song in songs {
-                    let et = song.title.replacingOccurrences(of: "\"", with: "\\\"")
-                    let ea = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
+                    let et = song.title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                    let ea = song.artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
                     _ = try? syncRun {
                         try await backend.runMusic("""
                             set results to (every track of playlist "Library" whose name is "\(et)" and artist is "\(ea)")
@@ -411,7 +412,7 @@ struct PlaylistAdd: ParsableCommand {
                                 set results to (every track of playlist "Library" whose name contains "\(et)" and artist contains "\(ea)")
                             end if
                             if (count of results) > 0 then
-                                duplicate item 1 of results to playlist "\(playlist)"
+                                duplicate item 1 of results to playlist "\(escapeAppleScriptString(playlist))"
                             end if
                         """)
                     }
@@ -443,8 +444,8 @@ struct PlaylistAdd: ParsableCommand {
             try! syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
         }
 
-        let escapedTitle = song.title.replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedArtist = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedTitle = song.title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedArtist = song.artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         _ = try syncRun {
             try await backend.runMusic("""
                 set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
@@ -452,7 +453,7 @@ struct PlaylistAdd: ParsableCommand {
                     set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
                 end if
                 if (count of results) > 0 then
-                    duplicate item 1 of results to playlist "\(playlist)"
+                    duplicate item 1 of results to playlist "\(escapeAppleScriptString(playlist))"
                 end if
             """)
         }
@@ -466,9 +467,11 @@ struct PlaylistRemove: ParsableCommand {
     @Argument(help: "Track name to remove") var title: String
     func run() throws {
         let backend = AppleScriptBackend()
+        let escPlaylist = escapeAppleScriptString(playlist)
+        let escTitle = escapeAppleScriptString(title)
         _ = try syncRun {
             try await backend.runMusic("""
-                set t to (first track of playlist "\(playlist)" whose name contains "\(title)")
+                set t to (first track of playlist "\(escPlaylist)" whose name contains "\(escTitle)")
                 delete t
             """)
         }
@@ -483,9 +486,10 @@ struct PlaylistShare: ParsableCommand {
     @Option(name: .long, help: "Send via email") var email: String?
     func run() throws {
         let backend = AppleScriptBackend()
+        let escName = escapeAppleScriptString(name)
         let trackList = try syncRun {
             try await backend.runMusic("""
-                set trackList to every track of playlist "\(name)"
+                set trackList to every track of playlist "\(escName)"
                 set output to ""
                 repeat with t in trackList
                     if output is not "" then set output to output & ", "
@@ -497,25 +501,25 @@ struct PlaylistShare: ParsableCommand {
         let message = "Check out my playlist '\(name)': \(trackList.trimmingCharacters(in: .whitespacesAndNewlines))"
 
         if let recipient = imessage {
-            let escaped = message.replacingOccurrences(of: "\"", with: "\\\"")
+            let escaped = message.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             _ = try syncRun {
                 try await backend.run("""
                     tell application "Messages"
                         set targetService to 1st account whose service type = iMessage
-                        set targetBuddy to participant "\(recipient)" of targetService
+                        set targetBuddy to participant "\(escapeAppleScriptString(recipient))" of targetService
                         send "\(escaped)" to targetBuddy
                     end tell
                 """)
             }
             print("Sent to \(recipient) via iMessage.")
         } else if let addr = email {
-            let escaped = message.replacingOccurrences(of: "\"", with: "\\\"")
+            let escaped = message.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             _ = try syncRun {
                 try await backend.run("""
                     tell application "Mail"
-                        set newMessage to make new outgoing message with properties {subject:"Playlist: \(name)", content:"\(escaped)", visible:true}
+                        set newMessage to make new outgoing message with properties {subject:"Playlist: \(escName)", content:"\(escaped)", visible:true}
                         tell newMessage
-                            make new to recipient at end of to recipients with properties {address:"\(addr)"}
+                            make new to recipient at end of to recipients with properties {address:"\(escapeAppleScriptString(addr))"}
                         end tell
                         activate
                     end tell
@@ -543,12 +547,12 @@ struct PlaylistTemp: ParsableCommand {
         let backend = AppleScriptBackend()
 
         _ = try syncRun {
-            try await backend.runMusic("make new playlist with properties {name:\"\(name)\"}")
+            try await backend.runMusic("make new playlist with properties {name:\"\(escapeAppleScriptString(name))\"}")
         }
 
         for i in stride(from: 0, to: items.count, by: 2) {
-            let title = items[i].replacingOccurrences(of: "\"", with: "\\\"")
-            let artist = items[i + 1].replacingOccurrences(of: "\"", with: "\\\"")
+            let title = items[i].replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let artist = items[i + 1].replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             _ = try syncRun {
                 try await backend.runMusic("""
                     set results to (every track of playlist "Library" whose name is "\(title)" and artist is "\(artist)")
@@ -556,7 +560,7 @@ struct PlaylistTemp: ParsableCommand {
                         set results to (every track of playlist "Library" whose name contains "\(title)" and artist contains "\(artist)")
                     end if
                     if (count of results) > 0 then
-                        duplicate item 1 of results to playlist "\(name)"
+                        duplicate item 1 of results to playlist "\(escapeAppleScriptString(name))"
                     end if
                 """)
             }
@@ -567,7 +571,7 @@ struct PlaylistTemp: ParsableCommand {
             try await backend.runMusic("set shuffle enabled to true")
         }
         _ = try syncRun {
-            try await backend.runMusic("play playlist \"\(name)\"")
+            try await backend.runMusic("play playlist \"\(escapeAppleScriptString(name))\"")
         }
         print("Playing temp playlist with \(items.count / 2) tracks. Run `music playlist cleanup` when done.")
     }
@@ -590,7 +594,7 @@ struct PlaylistCreateFrom: ParsableCommand {
         let backend = AppleScriptBackend()
 
         _ = try syncRun {
-            try await backend.runMusic("make new playlist with properties {name:\"\(name)\"}")
+            try await backend.runMusic("make new playlist with properties {name:\"\(escapeAppleScriptString(name))\"}")
         }
 
         var added: [(title: String, artist: String)] = []
@@ -632,8 +636,8 @@ struct PlaylistCreateFrom: ParsableCommand {
         let total = added.count
         var count = 0
         for track in added {
-            let escapedTitle = track.title.replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedArtist = track.artist.replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedTitle = track.title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedArtist = track.artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             _ = try syncRun {
                 try await backend.runMusic("""
                     set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
@@ -641,7 +645,7 @@ struct PlaylistCreateFrom: ParsableCommand {
                         set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
                     end if
                     if (count of results) > 0 then
-                        duplicate item 1 of results to playlist "\(name)"
+                        duplicate item 1 of results to playlist "\(escapeAppleScriptString(name))"
                     end if
                 """)
             }

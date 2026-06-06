@@ -275,8 +275,8 @@ func handleSongAction(_ action: MultiSelectAction, songs: [CatalogSong], api: RE
     switch action {
     case .played(let idx):
         let song = songs[idx]
-        let escapedTitle = song.title.replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedArtist = song.artist.replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedTitle = song.title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedArtist = song.artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let result = try syncRun {
             try await backend.runMusic("""
                 set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
@@ -322,8 +322,8 @@ func handleSongAction(_ action: MultiSelectAction, songs: [CatalogSong], api: RE
         try syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
         for idx in indices {
             let s = songs[idx]
-            let et = s.title.replacingOccurrences(of: "\"", with: "\\\"")
-            let ea = s.artist.replacingOccurrences(of: "\"", with: "\\\"")
+            let et = s.title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let ea = s.artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             _ = try? syncRun {
                 try await backend.runMusic("""
                     set results to (every track of playlist "Library" whose name is "\(et)" and artist is "\(ea)")
@@ -352,8 +352,8 @@ func handleSongAction(_ action: MultiSelectAction, songs: [CatalogSong], api: RE
         try syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
         for idx in indices {
             let s = songs[idx]
-            let et = s.title.replacingOccurrences(of: "\"", with: "\\\"")
-            let ea = s.artist.replacingOccurrences(of: "\"", with: "\\\"")
+            let et = s.title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let ea = s.artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             _ = try? syncRun {
                 try await backend.runMusic("""
                     set results to (every track of playlist "Library" whose name is "\(et)" and artist is "\(ea)")

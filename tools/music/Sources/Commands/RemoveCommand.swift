@@ -19,8 +19,8 @@ struct Remove: ParsableCommand {
         }
         let title = String(parts[0])
         let artist = String(parts[1])
-        let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedArtist = artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
 
         func deleteTrack(from playlist: String) throws -> Bool {
             let check = try? syncRun {

@@ -71,8 +71,8 @@ struct Add: ParsableCommand {
 
         if !to.isEmpty, let title = trackTitle, let artist = trackArtist {
             let backend = AppleScriptBackend()
-            let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedArtist = artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
 
             if songToAdd != nil {
                 try syncRun { try await Task.sleep(nanoseconds: 4_000_000_000) }
@@ -86,7 +86,7 @@ struct Add: ParsableCommand {
                             set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
                         end if
                         if (count of results) > 0 then
-                            duplicate item 1 of results to playlist "\(pl)"
+                            duplicate item 1 of results to playlist "\(escapeAppleScriptString(pl))"
                         end if
                     """)
                 }

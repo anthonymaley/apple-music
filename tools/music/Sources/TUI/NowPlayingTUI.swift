@@ -124,8 +124,8 @@ func pollSurroundingTracks(backend: AppleScriptBackend = AppleScriptBackend()) -
 }
 
 func pollAlbumTracks(for np: NowPlayingState, backend: AppleScriptBackend = AppleScriptBackend()) -> [TrackListEntry] {
-    let album = np.album.replacingOccurrences(of: "\"", with: "\\\"")
-    let artist = np.artist.replacingOccurrences(of: "\"", with: "\\\"")
+    let album = np.album.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    let artist = np.artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     let currentTitle = np.track
     let currentArtist = np.artist
 
@@ -326,10 +326,6 @@ func formatTime(_ seconds: Int) -> String {
     return String(format: "%d:%02d", m, s)
 }
 
-func escapeAppleScriptString(_ value: String) -> String {
-    value.replacingOccurrences(of: "\"", with: "\\\"")
-}
-
 func startRadioStation() -> PlaybackContext? {
     let backend = AppleScriptBackend()
     // Get current track info
@@ -437,11 +433,6 @@ enum NowPlayingResult {
     case quit   // user pressed q
 }
 
-enum RightPaneMode {
-    case playlist
-    case queue
-}
-
 enum TimelineRowKind {
     case playlist
     case history
@@ -495,82 +486,6 @@ func buildPlaylistRows(
     }
 }
 
-func buildContextQueueRows(
-    contextTracks: [String],
-    history: [(track: String, artist: String)],
-    currentIndex: Int?
-) -> [TimelineRow] {
-    var rows: [TimelineRow] = history.map { item in
-        TimelineRow(
-            id: trackKey(title: item.track, artist: item.artist),
-            kind: .history,
-            index: nil,
-            title: item.track,
-            artist: item.artist,
-            label: "\(item.track) \u{2014} \(item.artist)",
-            isCurrent: false,
-            wasPlayed: true,
-            isReplayable: true
-        )
-    }
-
-    if let currentIndex, currentIndex >= 0, currentIndex < contextTracks.count {
-        let currentLine = contextTracks[currentIndex]
-        let parsed = splitTrackLine(currentLine)
-        rows.append(
-            TimelineRow(
-                id: trackKey(title: parsed.title, artist: parsed.artist),
-                kind: .queue,
-                index: currentIndex + 1,
-                title: parsed.title,
-                artist: parsed.artist,
-                label: currentLine,
-                isCurrent: true,
-                wasPlayed: false,
-                isReplayable: true
-            )
-        )
-
-        if currentIndex + 1 < contextTracks.count {
-            rows.append(
-                contentsOf: contextTracks[(currentIndex + 1)...].enumerated().map { offset, line in
-                    let idx = currentIndex + 1 + offset
-                    let parsed = splitTrackLine(line)
-                    return TimelineRow(
-                        id: trackKey(title: parsed.title, artist: parsed.artist),
-                        kind: .queue,
-                        index: idx + 1,
-                        title: parsed.title,
-                        artist: parsed.artist,
-                        label: line,
-                        isCurrent: false,
-                        wasPlayed: false,
-                        isReplayable: true
-                    )
-                }
-            )
-        }
-    }
-
-    return rows
-}
-
-func buildHistoryRows(history: [(track: String, artist: String)]) -> [TimelineRow] {
-    history.map { item in
-        TimelineRow(
-            id: trackKey(title: item.track, artist: item.artist),
-            kind: .history,
-            index: nil,
-            title: item.track,
-            artist: item.artist,
-            label: "\(item.track) \u{2014} \(item.artist)",
-            isCurrent: false,
-            wasPlayed: true,
-            isReplayable: true
-        )
-    }
-}
-
 func buildStandaloneRows(
     history: [(track: String, artist: String)],
     surrounding: [TrackListEntry]
@@ -617,7 +532,7 @@ func buildStandaloneRows(
 }
 
 func playTrackInPlaylist(backend: AppleScriptBackend, playlistName: String, index: Int) {
-    let escapedPlaylist = playlistName.replacingOccurrences(of: "\"", with: "\\\"")
+    let escapedPlaylist = playlistName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     _ = try? syncRun {
         try await backend.runMusic("play track \(index) of playlist \"\(escapedPlaylist)\"")
     }
@@ -630,8 +545,8 @@ func playTrackInCurrentPlaylist(backend: AppleScriptBackend, index: Int) {
 }
 
 func playLibraryTrack(backend: AppleScriptBackend, title: String, artist: String) {
-    let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-    let escapedArtist = artist.replacingOccurrences(of: "\"", with: "\\\"")
+    let escapedTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    let escapedArtist = artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     _ = try? syncRun {
         try await backend.runMusic("""
             set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")

@@ -21,10 +21,11 @@ struct Play: ParsableCommand {
 
         // Existing flag-based behavior takes priority
         if let playlist = playlist {
+            let escPlaylist = escapeAppleScriptString(playlist)
             _ = try syncRun {
                 try await backend.runMusic("""
                     set shuffle enabled to true
-                    play playlist "\(playlist)"
+                    play playlist "\(escPlaylist)"
                 """)
             }
             showNowPlaying(json: json, waitForPlay: true)
@@ -32,10 +33,11 @@ struct Play: ParsableCommand {
         }
 
         if let album = album {
-            let artistFilter = artist.map { " and artist contains \"\($0)\"" } ?? ""
+            let artistFilter = artist.map { " and artist contains \"\(escapeAppleScriptString($0))\"" } ?? ""
+            let escAlbum = escapeAppleScriptString(album)
             let result = try syncRun {
                 try await backend.runMusic("""
-                    set results to (every track of playlist "Library" whose album contains "\(album)"\(artistFilter))
+                    set results to (every track of playlist "Library" whose album contains "\(escAlbum)"\(artistFilter))
                     if (count of results) > 0 then
                         set firstTrack to item 1 of results
                         set firstNumber to 9999
@@ -170,13 +172,14 @@ struct Play: ParsableCommand {
 
             // Route to speaker without forcing a full AirPlay reset.
             if let speaker = matchedSpeaker {
+                let escSpeaker = escapeAppleScriptString(speaker)
                 _ = try syncRun {
-                    try await backend.runMusic("set selected of AirPlay device \"\(speaker)\" to true")
+                    try await backend.runMusic("set selected of AirPlay device \"\(escSpeaker)\" to true")
                 }
                 // Set volume if specified
                 if let vol = speakerVolume {
                     _ = try syncRun {
-                        try await backend.runMusic("set sound volume of AirPlay device \"\(speaker)\" to \(vol)")
+                        try await backend.runMusic("set sound volume of AirPlay device \"\(escSpeaker)\" to \(vol)")
                     }
                     print("\(speaker) [\(vol)]")
                 }
@@ -200,7 +203,7 @@ struct Play: ParsableCommand {
             }
 
             if !playlistName.isEmpty {
-                let escapedQuery = playlistName.replacingOccurrences(of: "\"", with: "\\\"")
+                let escapedQuery = playlistName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
                 let result = try syncRun {
                     try await backend.runMusic("""
                         try
@@ -249,9 +252,9 @@ struct Play: ParsableCommand {
 }
 
 func playLocalSong(backend: AppleScriptBackend, title: String, artist: String?) throws -> Bool {
-    let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+    let escapedTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     let artistFilter = artist.map {
-        " and artist contains \"\($0.replacingOccurrences(of: "\"", with: "\\\""))\""
+        " and artist contains \"\($0.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
     } ?? ""
     let result = try syncRun {
         try await backend.runMusic("""
@@ -462,9 +465,13 @@ struct Repeat_: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "repeat", abstract: "Set repeat mode.")
     @Argument(help: "off, one, or all") var mode: String
     func run() throws {
+        let m = mode.lowercased()
+        guard ["off", "one", "all"].contains(m) else {
+            throw ValidationError("Repeat mode must be off, one, or all.")
+        }
         let backend = AppleScriptBackend()
-        _ = try syncRun { try await backend.runMusic("set song repeat to \(mode.lowercased())") }
-        print("Repeat \(mode.lowercased()).")
+        _ = try syncRun { try await backend.runMusic("set song repeat to \(m)") }
+        print("Repeat \(m).")
     }
 }
 

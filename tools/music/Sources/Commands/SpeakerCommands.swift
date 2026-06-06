@@ -81,24 +81,24 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
     case .add(let name):
         let resolved = try resolveSpeakerName(name, backend: backend)
         _ = try syncRun {
-            try await backend.runMusic("set selected of AirPlay device \"\(resolved)\" to true")
+            try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(resolved))\" to true")
         }
         print("Added \(resolved).")
 
     case .addWithVolume(let name, let volume):
         let resolved = try resolveSpeakerName(name, backend: backend)
         _ = try syncRun {
-            try await backend.runMusic("set selected of AirPlay device \"\(resolved)\" to true")
+            try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(resolved))\" to true")
         }
         _ = try syncRun {
-            try await backend.runMusic("set sound volume of AirPlay device \"\(resolved)\" to \(volume)")
+            try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(resolved))\" to \(volume)")
         }
         print("Added \(resolved) [\(volume)].")
 
     case .remove(let name):
         let resolved = try resolveSpeakerName(name, backend: backend)
         _ = try syncRun {
-            try await backend.runMusic("set selected of AirPlay device \"\(resolved)\" to false")
+            try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(resolved))\" to false")
         }
         print("Removed \(resolved).")
 
@@ -113,7 +113,7 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
             """)
         }
         _ = try syncRun {
-            try await backend.runMusic("set selected of AirPlay device \"\(resolved)\" to true")
+            try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(resolved))\" to true")
         }
         print("Switched to \(resolved) only.")
 
@@ -122,7 +122,7 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
         for idx in idxs {
             let speaker = try cache.lookupSpeaker(index: idx)
             _ = try syncRun {
-                try await backend.runMusic("set selected of AirPlay device \"\(speaker.name)\" to true")
+                try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(speaker.name))\" to true")
             }
             print("Added \(speaker.name).")
         }
@@ -132,7 +132,7 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
             // Wake a specific speaker: select it, then reset to establish a clean connection
             let resolved = try resolveSpeakerName(name, backend: backend)
             _ = try syncRun {
-                try await backend.runMusic("set selected of AirPlay device \"\(resolved)\" to true")
+                try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(resolved))\" to true")
             }
         }
         let reset = withStatus("Resetting AirPlay speakers...") {
@@ -159,14 +159,14 @@ private func runSpeakerTUI() throws {
     let result = runMultiSelectList(title: "AirPlay Speakers", items: &items, onToggle: { idx, selected in
         let name = devices[idx]["name"] as! String
         _ = try? syncRun {
-            try await backend.runMusic("set selected of AirPlay device \"\(name)\" to \(selected)")
+            try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(name))\" to \(selected)")
         }
     }, onAdjust: { idx, delta in
         volumes[idx] = min(100, max(0, volumes[idx] + delta))
         let name = devices[idx]["name"] as! String
         let vol = volumes[idx]
         _ = try? syncRun {
-            try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(vol)")
+            try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(name))\" to \(vol)")
         }
         return "vol: \(vol)"
     })
@@ -249,7 +249,7 @@ func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
         verbose("deselecting \(s.name)...")
         do {
             _ = try syncRun {
-                try await backend.runMusic("set selected of AirPlay device \"\(s.name)\" to false")
+                try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(s.name))\" to false")
             }
         } catch {
             verbose("deselect failed for \(s.name): \(error.localizedDescription)")
@@ -266,7 +266,7 @@ func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
         verbose("reselecting \(s.name)...")
         do {
             _ = try syncRun {
-                try await backend.runMusic("set selected of AirPlay device \"\(s.name)\" to true")
+                try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(s.name))\" to true")
             }
         } catch {
             verbose("reselect failed for \(s.name): \(error.localizedDescription)")
@@ -277,7 +277,7 @@ func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
     for s in speakers {
         do {
             _ = try syncRun {
-                try await backend.runMusic("set sound volume of AirPlay device \"\(s.name)\" to \(s.volume)")
+                try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(s.name))\" to \(s.volume)")
             }
         } catch {
             verbose("volume restore failed for \(s.name): \(error.localizedDescription)")

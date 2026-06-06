@@ -34,7 +34,7 @@ struct Vol: ParsableCommand {
 
                 runVolumeMixer(speakers: &speakers) { name, volume in
                     _ = try? syncRun {
-                        try await backend.runMusic("set sound volume of AirPlay device \"\(name)\" to \(volume)")
+                        try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(name))\" to \(volume)")
                     }
                 }
                 return
@@ -118,7 +118,7 @@ struct Vol: ParsableCommand {
             let speakerName = args.dropLast().joined(separator: " ")
             let resolved = try resolveSpeakerName(speakerName, backend: backend)
             _ = try syncRun {
-                try await backend.runMusic("set sound volume of AirPlay device \"\(resolved)\" to \(vol)")
+                try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(resolved))\" to \(vol)")
             }
             print("\(resolved) [\(vol)]")
         }

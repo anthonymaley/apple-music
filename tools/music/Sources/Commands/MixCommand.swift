@@ -18,8 +18,9 @@ struct Mix: ParsableCommand {
         let artistList = artists.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         let perArtist = max(count / artistList.count, 2)
 
+        let escName = escapeAppleScriptString(name)
         _ = try syncRun {
-            try await backend.runMusic("make new playlist with properties {name:\"\(name)\"}")
+            try await backend.runMusic("make new playlist with properties {name:\"\(escName)\"}")
         }
 
         var allSongs: [CatalogSong] = []
@@ -37,11 +38,13 @@ struct Mix: ParsableCommand {
         try syncRun { try await Task.sleep(nanoseconds: 3_000_000_000) }
 
         for song in allSongs {
+            let escTitle = escapeAppleScriptString(song.title)
+            let escArtist = escapeAppleScriptString(song.artist)
             _ = try syncRun {
                 try await backend.runMusic("""
-                    set results to (every track of playlist "Library" whose name contains "\(song.title)" and artist contains "\(song.artist)")
+                    set results to (every track of playlist "Library" whose name contains "\(escTitle)" and artist contains "\(escArtist)")
                     if (count of results) > 0 then
-                        duplicate item 1 of results to playlist "\(name)"
+                        duplicate item 1 of results to playlist "\(escName)"
                     end if
                 """)
             }
