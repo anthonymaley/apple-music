@@ -26,7 +26,23 @@ struct TrackListEntry {
     let isCurrent: Bool
 }
 
-func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> NowPlayingState? {
+/// Result of a single poll. Distinguishes a genuine stop (player reported
+/// "stopped") from a transient read failure (AppleScript threw or returned
+/// something unparseable). Collapsing both to `nil` previously caused two
+/// bugs: a single hiccup mid-track blanked the UI, and in context mode it
+/// skipped to the next track.
+enum PollOutcome {
+    case active(NowPlayingState)
+    case stopped
+    case unavailable
+}
+
+/// Consecutive `.unavailable` polls tolerated before the UI falls back to the
+/// "stopped" screen. A single transient AppleScript hiccup must not blank a
+/// screen that is actually playing.
+private let unavailableBlankThreshold = 4
+
+func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> PollOutcome {
     guard let result = try? syncRun({
         try await backend.runMusic("""
             try
@@ -57,16 +73,17 @@ func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> NowPl
             end try
             return "STOPPED"
         """)
-    }) else { return nil }
+    }) else { return .unavailable }
 
     let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed == "STOPPED" { return nil }
+    if trimmed == "STOPPED" { return .stopped }
     let parts = trimmed.split(separator: "|", maxSplits: 10).map(String.init)
-    guard parts.count >= 7 else { return nil }
+    guard parts.count >= 7 else { return .unavailable }
 
-    let speakers = parts[6].split(separator: ",").map { pair -> (name: String, volume: Int) in
+    let speakers = parts[6].split(separator: ",").compactMap { pair -> (name: String, volume: Int)? in
         let kv = pair.split(separator: ":", maxSplits: 1)
-        return (name: String(kv[0]), volume: Int(kv.count > 1 ? String(kv[1]) : "0") ?? 0)
+        guard let first = kv.first else { return nil }
+        return (name: String(first), volume: Int(kv.count > 1 ? String(kv[1]) : "0") ?? 0)
     }
 
     let shuffleEnabled = parts.count > 7 && parts[7].trimmingCharacters(in: .whitespaces) == "true"
@@ -74,13 +91,13 @@ func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> NowPl
     let loved = parts.count > 9 && parts[9].trimmingCharacters(in: .whitespaces) == "true"
     let disliked = parts.count > 10 && parts[10].trimmingCharacters(in: .whitespaces) == "true"
 
-    return NowPlayingState(
+    return .active(NowPlayingState(
         track: parts[0], artist: parts[1], album: parts[2],
         duration: Int(parts[3]) ?? 0, position: Int(parts[4]) ?? 0,
         state: parts[5], speakers: speakers,
         shuffleEnabled: shuffleEnabled, repeatMode: repeatMode,
         loved: loved, disliked: disliked
-    )
+    ))
 }
 
 func pollSurroundingTracks(backend: AppleScriptBackend = AppleScriptBackend()) -> [TrackListEntry] {
@@ -834,6 +851,7 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
     var lastCurrentIdx: Int? = nil
     var lastShuffleEnabled = false
     var stoppedPolls = 0
+    var errorPolls = 0
     var history: [(track: String, artist: String)] = []
     var queueCursor = context?.startIndex ?? 0
     var queueScroll = 0
@@ -920,7 +938,8 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
 
     // Initial render
     let backend = AppleScriptBackend()
-    if let np = pollNowPlaying(backend: backend) {
+    switch pollNowPlaying(backend: backend) {
+    case .active(let np):
         lastTrackName = np.track
         lastArtistName = np.artist
         lastShuffleEnabled = np.shuffleEnabled
@@ -930,11 +949,18 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
             lastCurrentIdx = idx
         }
         render(np)
-    } else {
+    case .stopped, .unavailable:
         renderNowPlayingStopped(footer: contextStoppedFooter)
     }
 
     while true {
+        // Terminal was resized (SIGWINCH): wipe stale artifacts so the next
+        // poll tick repaints cleanly against the new dimensions.
+        if terminalResized {
+            terminalResized = false
+            print(ANSICode.cursorHome + ANSICode.clearScreen, terminator: "")
+            fflush(stdout)
+        }
         let key = KeyPress.read(timeout: 1.0)
 
         if let key = key {
@@ -1040,8 +1066,10 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
         }
 
         // Re-poll and render
-        if let np = pollNowPlaying(backend: backend) {
+        switch pollNowPlaying(backend: backend) {
+        case .active(let np):
             stoppedPolls = 0
+            errorPolls = 0
             lastShuffleEnabled = np.shuffleEnabled
             if np.track != lastTrackName {
                 if !lastTrackName.isEmpty {
@@ -1064,7 +1092,9 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
                 }
             }
             render(np)
-        } else {
+        case .stopped:
+            // Genuine end-of-track: advance to the next track in the playlist.
+            errorPolls = 0
             stoppedPolls += 1
             if let idx = lastCurrentIdx,
                idx + 1 < contextTracks.count,
@@ -1081,6 +1111,13 @@ func runNowPlayingWithContext(_ context: PlaybackContext?) -> NowPlayingResult {
             if !lastTrackName.isEmpty && stoppedPolls < 4 {
                 continue
             }
+            renderNowPlayingStopped(footer: contextStoppedFooter)
+        case .unavailable:
+            // Transient read failure — keep the last good frame and do NOT
+            // advance. Only fall back to the stopped screen after sustained
+            // failure (player likely gone), never on a single hiccup.
+            errorPolls += 1
+            if errorPolls < unavailableBlankThreshold { continue }
             renderNowPlayingStopped(footer: contextStoppedFooter)
         }
     }
@@ -1107,6 +1144,7 @@ func runNowPlayingTUI() {
     var lastPosition = 0
     var lastDuration = 0
     var stoppedPolls = 0
+    var errorPolls = 0
     var history: [(track: String, artist: String)] = []
     var timelineCursor = 0
     var timelineScroll = 0
@@ -1173,7 +1211,8 @@ func runNowPlayingTUI() {
 
     // Initial render
     let backend = AppleScriptBackend()
-    if let np = pollNowPlaying(backend: backend) {
+    switch pollNowPlaying(backend: backend) {
+    case .active(let np):
         lastTrackName = np.track
         lastArtistName = np.artist
         lastPosition = np.position
@@ -1183,11 +1222,18 @@ func runNowPlayingTUI() {
         let rows = buildStandaloneRows(history: history, surrounding: surroundingTracks)
         timelineCursor = rows.firstIndex(where: { $0.isCurrent }) ?? 0
         render(np)
-    } else {
+    case .stopped, .unavailable:
         renderNowPlayingStopped(footer: standaloneStoppedFooter)
     }
 
     while true {
+        // Terminal was resized (SIGWINCH): wipe stale artifacts so the next
+        // poll tick repaints cleanly against the new dimensions.
+        if terminalResized {
+            terminalResized = false
+            print(ANSICode.cursorHome + ANSICode.clearScreen, terminator: "")
+            fflush(stdout)
+        }
         let key = KeyPress.read(timeout: 1.0)
 
         if let key = key {
@@ -1264,8 +1310,10 @@ func runNowPlayingTUI() {
         }
 
         // Re-poll and render
-        if let np = pollNowPlaying(backend: backend) {
+        switch pollNowPlaying(backend: backend) {
+        case .active(let np):
             stoppedPolls = 0
+            errorPolls = 0
             lastPosition = np.position
             lastDuration = np.duration
             if np.track != lastTrackName {
@@ -1284,7 +1332,9 @@ func runNowPlayingTUI() {
                 flushStdin()
             }
             render(np)
-        } else {
+        case .stopped:
+            // Genuine stop. Auto-advance only if the track reached its end.
+            errorPolls = 0
             stoppedPolls += 1
             let naturalEnd = lastDuration > 0 && lastPosition >= max(0, lastDuration - 4)
             if naturalEnd,
@@ -1298,6 +1348,12 @@ func runNowPlayingTUI() {
             if !lastTrackName.isEmpty && stoppedPolls < 4 {
                 continue
             }
+            renderNowPlayingStopped(footer: standaloneStoppedFooter)
+        case .unavailable:
+            // Transient read failure — keep the last good frame, never blank
+            // on a single hiccup.
+            errorPolls += 1
+            if errorPolls < unavailableBlankThreshold { continue }
             renderNowPlayingStopped(footer: standaloneStoppedFooter)
         }
     }
