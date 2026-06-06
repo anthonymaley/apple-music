@@ -149,7 +149,7 @@ func runPlaylistBrowser(
                 let mark = (focus == .playlists) ? ANSICode.cyan : ANSICode.dim
                 out += "\(mark)\u{258C}\(ANSICode.reset) \(ANSICode.brightWhite)\(padName)\(ANSICode.reset) \(metaCell)"
             } else {
-                out += "  \(padName) \(metaCell)"
+                out += "  \(ANSICode.white)\(padName)\(ANSICode.reset) \(metaCell)"
             }
         }
     }
@@ -228,6 +228,34 @@ func runPlaylistBrowser(
         }
     }
 
+    func renderTrackList(_ z: PlaylistZones, into out: inout String) {
+        guard z.mode == .three, let rx = z.rightX else { return }
+        let frame = ScreenFrame.current()
+        var y = frame.bodyY
+        let tracks = fullCache[plCursor]?.tracks ?? []
+        out += ANSICode.moveTo(row: y, col: rx)
+        out += "\(ANSICode.cyan)Tracks\(ANSICode.reset) \(ANSICode.dim)\(tracks.count)\(ANSICode.reset)"
+        y += 1
+        out += ANSICode.moveTo(row: y, col: rx)
+        out += "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: min(z.rightWidth, 18)))\(ANSICode.reset)"
+        y += 1
+        let maxVis = max(1, frame.statusY - y - 1)
+        if trCursor < trScroll { trScroll = trCursor }
+        if trCursor >= trScroll + maxVis { trScroll = trCursor - maxVis + 1 }
+        let end = min(tracks.count, trScroll + maxVis)
+        for i in trScroll..<end {
+            out += ANSICode.moveTo(row: y, col: rx)
+            let idx = String(format: "%02d", i + 1)
+            let text = truncText(tracks[i], to: z.rightWidth - 4)
+            if i == trCursor {
+                out += "\(ANSICode.cyan)\u{25B6}\(ANSICode.reset) \(ANSICode.brightWhite)\(idx) \(text)\(ANSICode.reset)"
+            } else {
+                out += "\(ANSICode.dim)\(idx)\(ANSICode.reset)  \(text)"
+            }
+            y += 1
+        }
+    }
+
     func render() {
         let frame = ScreenFrame.current()
         let z = playlistZones(width: frame.width)
@@ -244,7 +272,11 @@ func runPlaylistBrowser(
         out += clearBody(frame)
         renderRail(z, into: &out, listY: listY, maxVisible: maxVisible)
         renderHero(z, into: &out)
-        renderPreview(z, into: &out)
+        if focus == .tracks {
+            renderTrackList(z, into: &out)
+        } else {
+            renderPreview(z, into: &out)
+        }
         if filtering || !filterText.isEmpty {
             out += ANSICode.moveTo(row: frame.bodyY, col: z.railX)
             out += "\(ANSICode.cyan)/\(ANSICode.reset) \(ANSICode.brightWhite)\(filterText)\(ANSICode.reset)\(filtering ? "\u{2588}" : "")"

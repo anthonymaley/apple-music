@@ -23,6 +23,7 @@ struct ANSICode {
     static let brightWhite = "\u{1B}[97m"
     static let lime = "\u{1B}[92m"
     static let amber = "\u{1B}[38;2;255;176;0m"
+    static let white = "\u{1B}[37m"
 
     static func moveTo(row: Int, col: Int) -> String {
         "\u{1B}[\(row);\(col)H"
