@@ -5,22 +5,25 @@ import Foundation
 /// and a window of its tracks around the current one, with the current marked.
 struct ContextQueue {
     let name: String
+    let currentIndex: Int
+    let total: Int
     let tracks: [TrackListEntry]   // index = real position in the current playlist
 }
 
 /// Pure parse of the pollContextQueue result.
-/// Format: line 1 = context name, line 2 = current index, line 3 = window start,
-/// then "index|title|artist" rows.
+/// Format: line 1 = context name, line 2 = current index, line 3 = total,
+/// line 4 = window start, then "index|title|artist" rows.
 func parseContextQueue(_ raw: String) -> ContextQueue {
     let lines = raw.components(separatedBy: "\n")
-    guard lines.count >= 3 else { return ContextQueue(name: "", tracks: []) }
+    guard lines.count >= 4 else { return ContextQueue(name: "", currentIndex: -1, total: 0, tracks: []) }
     let name = lines[0].trimmingCharacters(in: .whitespaces)
     // Mark the current track by its real playlist index (line 2), not by
     // title/artist — a library with duplicate adjacent tracks would otherwise
     // mark more than one row as current.
     let currentIndex = Int(lines[1].trimmingCharacters(in: .whitespaces)) ?? -1
+    let total = Int(lines[2].trimmingCharacters(in: .whitespaces)) ?? 0
     var tracks: [TrackListEntry] = []
-    for line in lines.dropFirst(3) where !line.isEmpty {
+    for line in lines.dropFirst(4) where !line.isEmpty {
         let f = line.split(separator: "|", maxSplits: 2).map(String.init)
         guard f.count == 3, let idx = Int(f[0]) else { continue }
         tracks.append(TrackListEntry(
@@ -28,7 +31,7 @@ func parseContextQueue(_ raw: String) -> ContextQueue {
             isCurrent: idx == currentIndex
         ))
     }
-    return ContextQueue(name: name, tracks: tracks)
+    return ContextQueue(name: name, currentIndex: currentIndex, total: total, tracks: tracks)
 }
 
 /// Fetch the current playlist's name + a window of tracks around the current
@@ -47,7 +50,7 @@ func pollContextQueue(np: NowPlayingState, backend: AppleScriptBackend = AppleSc
                 if startIdx < 1 then set startIdx to 1
                 set endIdx to idx + 40
                 if endIdx > total then set endIdx to total
-                set output to cpName & linefeed & idx & linefeed & startIdx
+                set output to cpName & linefeed & idx & linefeed & total & linefeed & startIdx
                 if endIdx >= startIdx then
                     set ns to name of tracks startIdx thru endIdx of cp
                     set ars to artist of tracks startIdx thru endIdx of cp
@@ -59,7 +62,7 @@ func pollContextQueue(np: NowPlayingState, backend: AppleScriptBackend = AppleSc
             end try
             return ""
         """)
-    }) else { return ContextQueue(name: "", tracks: []) }
+    }) else { return ContextQueue(name: "", currentIndex: -1, total: 0, tracks: []) }
     return parseContextQueue(raw)
 }
 
