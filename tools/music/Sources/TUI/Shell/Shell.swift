@@ -9,7 +9,7 @@ func runShell() {
 
     let router = Router(root: .nowPlaying)
     var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend)]
-    let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists")]
+    let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists"), (.speakers, "Speakers")]
 
     // Lazily build a scene the first time it's shown. Returns nil if it can't be
     // built (e.g. no playlists), so the caller can refuse the switch.
@@ -22,6 +22,10 @@ func runShell() {
             let scene = PlaylistsScene(backend: backend,
                                        playlists: names,
                                        sources: makePlaylistDataSources(backend: backend, names: names))
+            scenes[id] = scene
+            return scene
+        case .speakers:
+            let scene = SpeakersScene(backend: backend)
             scenes[id] = scene
             return scene
         default:
@@ -62,7 +66,7 @@ func runShell() {
         // Footer hint line (skipped in Bare tier where the bar occupies the footer).
         if frame.barTier != .bare {
             out += ANSICode.moveTo(row: frame.footerY, col: 3) + ANSICode.clearLine
-            out += "\(ANSICode.dim)1 Now  2 Playlists  Tab Switch   \u{2191}\u{2193} Move  Enter Open  p Play  s Shuffle  / Filter  q Quit\(ANSICode.reset)"
+            out += "\(ANSICode.dim)1 Now  2 Playlists  3 Speakers  Tab Switch   \u{2191}\u{2193} Move  Enter Select  q Quit\(ANSICode.reset)"
         }
         print(out, terminator: "")
         fflush(stdout)
