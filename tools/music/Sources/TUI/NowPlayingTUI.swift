@@ -343,21 +343,37 @@ func formatTime(_ seconds: Int) -> String {
     return String(format: "%d:%02d", m, s)
 }
 
-/// Invoke Apple Music's NATIVE radio by clicking Song ▸ Create Station via
-/// System Events. This is the real Apple Music station engine (a diverse,
-/// endless mix), acting on the currently-playing track — not a home-built
-/// search. Requires Accessibility/Automation permission for the process driving
-/// Music (the same permission `music` already uses). Best-effort: if there is no
-/// current track or the menu item is disabled (e.g. a non-catalog track), the
-/// click is a no-op.
+/// Invoke Apple Music's NATIVE radio (the real station engine — a diverse,
+/// endless mix) by clicking Song ▸ Create Station via System Events. Clicking a
+/// menu bar item only works when its app is frontmost, so this captures the
+/// current front app, activates Music, clicks, then restores focus to the
+/// terminal — a brief (~0.5s) focus flicker is the cost. Acts on the
+/// currently-playing track. Requires Accessibility/Automation permission.
+/// Best-effort: a no-op if there's no current track or the item is disabled.
 func createStationFromCurrentTrack(backend: AppleScriptBackend = AppleScriptBackend()) {
     _ = try? syncRun {
         try await backend.runMusic("""
+            set frontApp to ""
+            try
+                tell application "System Events"
+                    set frontApp to name of first application process whose frontmost is true
+                end tell
+            end try
+            activate
+            delay 0.5
             tell application "System Events"
                 tell process "Music"
                     click menu item "Create Station" of menu "Song" of menu bar 1
                 end tell
             end tell
+            delay 0.2
+            if frontApp is not "" then
+                try
+                    tell application "System Events"
+                        set frontmost of (first application process whose name is frontApp) to true
+                    end tell
+                end try
+            end if
         """)
     }
 }
