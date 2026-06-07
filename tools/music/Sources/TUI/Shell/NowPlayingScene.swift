@@ -29,8 +29,12 @@ final class NowPlayingScene: Scene {
 
     init(backend: AppleScriptBackend) { self.backend = backend }
 
+    // Once the user acts on an auto-detected queue-end, remember which one (by its
+    // ended track) so the menu doesn't re-appear for the same event — e.g. after
+    // picking Quiet, which leaves playback stopped with queueEnded still set.
+    private var dismissedSeed = ""
     private func menuActive(_ snapshot: NowPlayingSnapshot) -> Bool {
-        snapshot.queueEnded || manualMenu
+        (snapshot.queueEnded && snapshot.endedTrack != dismissedSeed) || manualMenu
     }
     var capturesAllInput: Bool { menuShownLastFrame }
 
@@ -186,7 +190,8 @@ final class NowPlayingScene: Scene {
         if menuShownLastFrame {
             if let action = continuationAction(for: key) {
                 act(on: action)
-                manualMenu = false           // menu dismissed; queueEnded clears when poller re-enters a real context
+                manualMenu = false
+                dismissedSeed = pendingSeedTitle   // don't re-show this queue-end's menu
                 if wantsPlaylists { wantsPlaylists = false; return .push(.playlists) }
                 return .redraw
             }

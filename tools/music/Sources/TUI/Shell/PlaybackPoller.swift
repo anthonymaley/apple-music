@@ -152,9 +152,24 @@ final class PlaybackPoller {
                 stoppedPolls = 0
                 return // next tick will observe the new track
             }
+            // End-of-queue on STOP (the common case): the last track of a real
+            // playlist finished and playback stopped (no autoplay). This is the
+            // reliable queue-end signal — not a context flip to the library.
+            if !qEnded,
+               lastDuration > 0, lastPosition >= lastDuration - 12,
+               let ctx = lastContext,
+               !isLibraryContextName(ctx.name), !ctx.name.isEmpty,
+               ctx.total > 0, ctx.currentIndex >= ctx.total {
+                qEnded = true
+                endedPlaylist = ctx.name
+                endedTrack = lastTrack
+                endedArtist = lastArtist
+                endedArtLines = artLines
+            }
             // Tolerate a few stopped polls before publishing a genuine stop, so a
-            // brief gap between tracks doesn't flash the stopped state.
-            if !lastTrack.isEmpty && stoppedPolls < 4 { return }
+            // brief gap between tracks doesn't flash the stopped state. But once a
+            // queue-end is detected, publish immediately so the menu appears.
+            if !qEnded && !lastTrack.isEmpty && stoppedPolls < 4 { return }
             store.write(NowPlayingSnapshot(
                 outcome: .stopped, history: history, surrounding: surrounding,
                 contextName: contextName, artLines: artLines,
