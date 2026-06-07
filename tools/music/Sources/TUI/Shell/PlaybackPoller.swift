@@ -22,6 +22,15 @@ final class PlaybackPoller {
     private var running = false
     private let finished = DispatchSemaphore(value: 0)
 
+    // Thread-confined working state (poller thread only).
+    private var lastTrack = ""
+    private var lastArtist = ""
+    private var lastPosition = 0
+    private var lastDuration = 0
+    private var stoppedPolls = 0
+    private var history: [(track: String, artist: String)] = []
+    private var surrounding: [TrackListEntry] = []
+
     init(store: NowPlayingStore, backend: AppleScriptBackend, intervalMs: UInt32 = 1000) {
         self.store = store
         self.backend = backend
@@ -60,10 +69,47 @@ final class PlaybackPoller {
         finished.signal()
     }
 
-    /// Overridden in Task 3 to carry history/album-context/auto-advance.
     func tick() {
-        let outcome = pollNowPlaying(backend: backend)
-        let prev = store.read()
-        store.write(NowPlayingSnapshot(outcome: outcome, history: prev.history, surrounding: prev.surrounding))
+        switch pollNowPlaying(backend: backend) {
+        case .active(let np):
+            stoppedPolls = 0
+            lastPosition = np.position
+            lastDuration = np.duration
+            if np.track != lastTrack {
+                // Record the track we just left into history (dedup against head).
+                if !lastTrack.isEmpty {
+                    if history.first.map({ $0.track != lastTrack || $0.artist != lastArtist }) ?? true {
+                        history.insert((track: lastTrack, artist: lastArtist), at: 0)
+                        if history.count > 20 { history.removeLast() }
+                    }
+                }
+                lastTrack = np.track
+                lastArtist = np.artist
+                surrounding = pollAlbumTracks(for: np, backend: backend)
+            }
+            store.write(NowPlayingSnapshot(outcome: .active(np), history: history, surrounding: surrounding))
+
+        case .stopped:
+            stoppedPolls += 1
+            // Auto-advance only when the previous track reached its natural end.
+            let naturalEnd = lastDuration > 0 && lastPosition >= max(0, lastDuration - 4)
+            if naturalEnd,
+               let cur = surrounding.firstIndex(where: { $0.isCurrent }),
+               cur + 1 < surrounding.count {
+                let entry = surrounding[cur + 1]
+                playLibraryTrack(backend: backend, title: entry.name, artist: entry.artist)
+                stoppedPolls = 0
+                return // next tick will observe the new track
+            }
+            // Tolerate a few stopped polls before publishing a genuine stop, so a
+            // brief gap between tracks doesn't flash the stopped state.
+            if !lastTrack.isEmpty && stoppedPolls < 4 { return }
+            store.write(NowPlayingSnapshot(outcome: .stopped, history: history, surrounding: surrounding))
+
+        case .unavailable:
+            // Transient read failure: keep the last published snapshot. Never blank
+            // on a single hiccup (the published snapshot is simply not overwritten).
+            return
+        }
     }
 }
