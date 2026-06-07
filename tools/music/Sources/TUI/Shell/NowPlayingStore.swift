@@ -10,6 +10,11 @@ struct NowPlayingSnapshot {
     var surrounding: [TrackListEntry]      // playback-context window (current playlist/album)
     var contextName: String = ""           // name of the current playlist/album
     var artLines: [String] = []            // current track album art, rendered
+    var queueEnded: Bool = false           // show the continuation card menu
+    var endedPlaylist: String = ""         // playlist that just ended
+    var endedTrack: String = ""            // last context track title (seed for Radio/Similar)
+    var endedArtist: String = ""           // last context track artist
+    var endedArtLines: [String] = []       // last context track album art (captured at detection)
 }
 
 /// Thread-safe box around the latest snapshot. The poller calls `write`; the
