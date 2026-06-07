@@ -351,15 +351,20 @@ func formatTime(_ seconds: Int) -> String {
 /// currently-playing track. Requires Accessibility/Automation permission.
 /// Best-effort: a no-op if there's no current track or the item is disabled.
 func createStationFromCurrentTrack(backend: AppleScriptBackend = AppleScriptBackend()) {
+    // Use the RAW runner (not runMusic) so the script is NOT wrapped in
+    // `tell application "Music"` — this matches the exact structure verified to
+    // work from the command line (`tell app "Music" to activate` as its own
+    // statement, then a separate System Events tell). Nesting the System Events
+    // click inside a `tell Music` block was a no-op.
     _ = try? syncRun {
-        try await backend.runMusic("""
+        try await backend.run("""
             set frontApp to ""
             try
                 tell application "System Events"
                     set frontApp to name of first application process whose frontmost is true
                 end tell
             end try
-            activate
+            tell application "Music" to activate
             delay 0.5
             tell application "System Events"
                 tell process "Music"
