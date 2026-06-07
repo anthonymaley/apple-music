@@ -376,8 +376,10 @@ struct Now: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Show what's currently playing.")
     @Flag(name: .long, help: "Output JSON") var json = false
     func run() throws {
-        if isBareInvocation(command: "now") && isTTY() {
-            runNowPlayingTUI()
+        let bareMusic = CommandLine.arguments.dropFirst().isEmpty   // `music` with no subcommand
+        let bareNow = isBareInvocation(command: "now")              // `music now` with no flags
+        if (bareMusic || bareNow) && isTTY() {
+            runShell()
             return
         }
         showNowPlaying(json: json)
