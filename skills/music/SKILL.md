@@ -135,7 +135,7 @@ music playlist                                # 2-pane playlist browser
 
 TUI behavior: standalone `music now` shows the current album context; `music playlist` hands off to Now Playing with the full selected playlist pinned. Radio builds a temporary shuffled playlist and hands off to the same playlist-backed Now Playing view when possible. Cursor movement is local and fast.
 
-TUI controls: `↑↓` navigate the right pane, `Enter` play selected, `←→` seek, `Space` pause, `z` toggle shuffle in playlist-origin Now Playing, `r` build radio playlist, `+/-` volume, `s` speakers, `v` mixer, `q` quit.
+TUI controls: `↑↓` navigate the right pane, `Enter` play selected, `←→` seek, `Space` pause, `</>` previous/next track (full up/down through the playlist), `z`/`r` shuffle the queue, `+/-` volume, `s` speakers, `v` mixer, `q` quit. Playlist track-play requires Music's Autoplay (∞) turned OFF — it drives playback track-by-track and needs each track to stop at its end.
 
 ## Result Cache
 

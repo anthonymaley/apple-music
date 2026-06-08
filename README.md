@@ -276,7 +276,9 @@ Claude handles multi-step orchestration — searching the catalog, creating play
 
 Run these commands in a real terminal (not inside Claude Code — TUI requires a TTY). Install `chafa` (`brew install chafa`) for album art in now-playing.
 
-**Now playing** (`music now`) — 3-column layout: album art, playback metadata, and a right pane. Standalone `music now` shows album context for the current track. When launched from `music playlist`, Now Playing keeps the full selected playlist pinned so you can browse and replay any track while playback continues. Radio (`r` or `music radio`) builds a temporary shuffled radio playlist and opens that playlist-backed Now Playing view when possible.
+**Now playing** (`music now`) — 3-column layout: album art, playback metadata, and a right pane. Standalone `music now` shows album context for the current track. When launched from `music playlist`, Now Playing keeps the full selected playlist pinned so you can browse and replay any track while playback continues.
+
+> **Turn off Music's Autoplay (∞).** Playlist track-selection and up/down navigation drive playback track-by-track and rely on a track *stopping* at its end. With Autoplay on, Music bleeds into the library between tracks. Disable it once in Music's Up Next panel (the ∞ button).
 
 | Key | Action |
 |-----|--------|
@@ -284,8 +286,8 @@ Run these commands in a real terminal (not inside Claude Code — TUI requires a
 | `Enter` | Play selected track |
 | `←`/`→` | Seek ±30s |
 | `Space` | Play/pause |
-| `z` | Toggle shuffle in playlist-origin Now Playing |
-| `r` | Build a temporary shuffled radio playlist from current track |
+| `z` / `r` | Shuffle the current playlist queue |
+| `<` / `>` | Previous / next track (full up/down through the playlist) |
 | `+`/`-` | Master volume ±5 |
 | `s` | AirPlay speaker picker |
 | `v` | Per-speaker volume mixer |

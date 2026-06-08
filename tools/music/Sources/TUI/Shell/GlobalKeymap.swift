@@ -3,7 +3,7 @@ import Foundation
 
 /// Actions the shell handles in every scene, before delegating scene-local keys.
 enum GlobalAction: Equatable {
-    case playPause, volumeUp, volumeDown, next, prev, shuffle, radio
+    case playPause, volumeUp, volumeDown, next, prev, shuffle
     case switchScene(Int)   // 1-based index into the visible scene tabs
     case quit
 }
@@ -18,8 +18,7 @@ func resolveGlobalKey(_ key: KeyPress) -> GlobalAction? {
     case .char("-"): return .volumeDown
     case .char(">"), .char("."), .f9: return .next
     case .char("<"), .char(","), .f7: return .prev
-    case .char("z"): return .shuffle
-    case .char("r"): return .radio
+    case .char("z"), .char("r"): return .shuffle   // 'r' (was radio) now also shuffles
     case .char("q"): return .quit
     case .char(let c) where c.isNumber:
         guard let n = c.wholeNumberValue, n >= 1 else { return nil }

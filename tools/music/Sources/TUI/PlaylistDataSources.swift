@@ -34,6 +34,26 @@ func parsePlaylistTracksResult(_ result: String) -> (count: Int, lines: [String]
 }
 
 /// Fetch the user's playlist names (one instant AppleScript call).
+/// Delete leftover "__queue__ …" temp playlists from prior sessions, sparing the one
+/// currently playing — deleting the playing playlist reverts Music to the library.
+/// Safe to run off-main at startup; playTrack also sweeps after each play.
+func sweepQueuePlaylists(backend: AppleScriptBackend) {
+    _ = try? syncRun {
+        try await backend.runMusic("""
+            set keepName to ""
+            try
+                set keepName to name of current playlist
+            end try
+            repeat with pp in (every user playlist)
+                try
+                    set nm to name of pp
+                    if (nm starts with "__queue__ ") and (nm is not keepName) then delete pp
+                end try
+            end repeat
+        """)
+    }
+}
+
 func fetchUserPlaylistNames(backend: AppleScriptBackend) -> [String] {
     guard let result = try? syncRun({
         try await backend.runMusic("""
@@ -49,6 +69,9 @@ func fetchUserPlaylistNames(backend: AppleScriptBackend) -> [String] {
         .components(separatedBy: "\n")
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty }
+        // Obsolete temp playlists left by the old play-track workaround; the seek
+        // approach no longer creates them. Hide so they don't clutter the rail.
+        .filter { !$0.hasPrefix("__queue__ ") }
 }
 
 /// Build the three data-source closures over a fixed `names` list. Each closure

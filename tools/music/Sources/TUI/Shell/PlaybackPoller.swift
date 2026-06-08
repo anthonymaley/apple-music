@@ -17,6 +17,7 @@ import Darwin
 final class PlaybackPoller {
     private let store: NowPlayingStore
     private let backend: AppleScriptBackend
+    private let appQueue: AppQueueStore
     private let intervalMs: UInt32
     private let lock = NSLock()
     private var running = false
@@ -39,9 +40,10 @@ final class PlaybackPoller {
     private var endedArtist = ""
     private var endedArtLines: [String] = []
 
-    init(store: NowPlayingStore, backend: AppleScriptBackend, intervalMs: UInt32 = 1000) {
+    init(store: NowPlayingStore, backend: AppleScriptBackend, appQueue: AppQueueStore, intervalMs: UInt32 = 1000) {
         self.store = store
         self.backend = backend
+        self.appQueue = appQueue
         self.intervalMs = intervalMs
     }
 
@@ -102,17 +104,26 @@ final class PlaybackPoller {
                 lastTrack = np.track
                 lastArtist = np.artist
 
-                // Prefer the real playback context (current playlist); fall back to
-                // album tracks when there's no playlist context.
-                let ctx = pollContextQueue(np: np, backend: backend)
-                if ctx.tracks.isEmpty {
-                    surrounding = pollAlbumTracks(for: np, backend: backend)
-                    contextName = np.album
+                // When the app owns the queue (a playlist track was picked), the
+                // Up Next window comes from OUR list — Music's `current playlist`
+                // is unreliable after the 26.x regression. Otherwise prefer Music's
+                // real context (current playlist), falling back to album tracks.
+                if let aq = appQueue.read() {
+                    let w = appQueueWindow(aq)
+                    surrounding = w.tracks
+                    contextName = w.name
                     lastContext = nil
                 } else {
-                    surrounding = ctx.tracks
-                    contextName = ctx.name
-                    lastContext = ctx
+                    let ctx = pollContextQueue(np: np, backend: backend)
+                    if ctx.tracks.isEmpty {
+                        surrounding = pollAlbumTracks(for: np, backend: backend)
+                        contextName = np.album
+                        lastContext = nil
+                    } else {
+                        surrounding = ctx.tracks
+                        contextName = ctx.name
+                        lastContext = ctx
+                    }
                 }
                 artLines = currentTrackArtLines(width: 44, height: 22)
 
@@ -122,14 +133,14 @@ final class PlaybackPoller {
                     prevWasRealPlaylist: prevCtx.map { !isLibraryContextName($0.name) && !$0.name.isEmpty } ?? false,
                     prevAtLastTrack: prevCtx.map { $0.total > 0 && $0.currentIndex >= $0.total } ?? false,
                     prevNaturalEnd: prevNatural,
-                    nowIsLibraryAutoplay: isLibraryContextName(ctx.name))
+                    nowIsLibraryAutoplay: isLibraryContextName(contextName))
                 if fired {
                     qEnded = true
                     endedPlaylist = prevCtx?.name ?? ""
                     endedTrack = prevTrack
                     endedArtist = prevArtist
                     endedArtLines = prevArt
-                } else if !isLibraryContextName(ctx.name) {
+                } else if !isLibraryContextName(contextName) {
                     // Re-entered a real context — clear any prior end-of-queue offer.
                     qEnded = false
                 }
@@ -144,7 +155,25 @@ final class PlaybackPoller {
             stoppedPolls += 1
             // Auto-advance only when the previous track reached its natural end.
             let naturalEnd = lastDuration > 0 && lastPosition >= max(0, lastDuration - 4)
-            if naturalEnd,
+            // App-owned queue: the single track stopped at its end (Autoplay off) —
+            // play the next track ourselves. step() returns nil at the queue's end,
+            // where we clear the queue and let playback stay stopped.
+            if naturalEnd, appQueue.isActive {
+                if let (pl, pos) = appQueue.step(1) {
+                    playQueueTrack(backend: backend, playlist: pl, position: pos)
+                    stoppedPolls = 0
+                    return // next tick will observe the new track
+                }
+                // Reached the end of the app-owned queue — surface the continuation menu.
+                if !qEnded {
+                    qEnded = true
+                    endedPlaylist = appQueue.read()?.playlistName ?? contextName
+                    endedTrack = lastTrack
+                    endedArtist = lastArtist
+                    endedArtLines = artLines
+                }
+                appQueue.clear()
+            } else if naturalEnd,
                let cur = surrounding.firstIndex(where: { $0.isCurrent }),
                cur + 1 < surrounding.count {
                 let entry = surrounding[cur + 1]

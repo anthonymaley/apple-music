@@ -1,11 +1,11 @@
 // tools/music/Sources/TUI/Shell/NowPlayingScene.swift
 import Foundation
 
-enum ContinuationAction: Equatable { case radio, playlist, quiet }
+enum ContinuationAction: Equatable { case shuffle, playlist, quiet }
 
 func continuationAction(for key: KeyPress) -> ContinuationAction? {
     switch key {
-    case .char("r"), .char("R"): return .radio
+    case .char("s"), .char("S"): return .shuffle
     case .char("p"), .char("P"): return .playlist
     case .char("q"), .char("Q"): return .quiet
     default: return nil
@@ -17,6 +17,7 @@ final class NowPlayingScene: Scene {
     let tabTitle = "Now"
 
     private let backend: AppleScriptBackend
+    private let appQueue: AppQueueStore
     private var cursor = 0
     private var scroll = 0
     private var rows: [TrackListEntry] = []
@@ -25,10 +26,14 @@ final class NowPlayingScene: Scene {
     private var menuShownLastFrame = false
     private var pendingSeedTitle = ""
     private var pendingSeedArtist = ""
+    private var pendingPlaylist = ""         // context/ended playlist, for the Shuffle action
     private var pendingFromStopped = false   // menu opened from an auto queue-end (playback stopped)
     private var wantsPlaylists = false
 
-    init(backend: AppleScriptBackend) { self.backend = backend }
+    init(backend: AppleScriptBackend, appQueue: AppQueueStore) {
+        self.backend = backend
+        self.appQueue = appQueue
+    }
 
     // Once the user acts on an auto-detected queue-end, remember which one (by its
     // ended track) so the menu doesn't re-appear for the same event — e.g. after
@@ -45,9 +50,11 @@ final class NowPlayingScene: Scene {
         if snapshot.queueEnded {
             pendingSeedTitle = snapshot.endedTrack
             pendingSeedArtist = snapshot.endedArtist
+            pendingPlaylist = snapshot.endedPlaylist
         } else if case .active(let np) = snapshot.outcome {
             pendingSeedTitle = np.track
             pendingSeedArtist = np.artist
+            pendingPlaylist = cleanContextName(snapshot.contextName)
         }
         rows = snapshot.surrounding
         // Snap the cursor to the current track when the track changes; leave it
@@ -164,8 +171,9 @@ final class NowPlayingScene: Scene {
         }
         let lx = 3
         var ly = artTop + artRows + 1
+        let shuffleTarget = pendingPlaylist.isEmpty ? seedTitle : pendingPlaylist
         let opts: [(String, String)] = [
-            ("[R]", "Artist Radio  \(ANSICode.dim)from \(truncText(seedTitle, to: 28))\(ANSICode.reset)"),
+            ("[S]", "Shuffle  \(ANSICode.dim)\(truncText(shuffleTarget, to: 28))\(ANSICode.reset)"),
             ("[P]", "Playlist  \(ANSICode.dim)browse\(ANSICode.reset)"),
             ("[Q]", "Quiet  \(ANSICode.dim)stop here\(ANSICode.reset)"),
         ]
@@ -178,18 +186,18 @@ final class NowPlayingScene: Scene {
 
     private func act(on action: ContinuationAction) {
         switch action {
-        case .radio:
-            // At an auto queue-end the player has stopped, so there's no current
-            // track for "Create Station" to act on — replay the ended track first
-            // to make it current, then invoke Apple Music's native station.
-            if pendingFromStopped {
-                playLibraryTrack(backend: backend, title: pendingSeedTitle, artist: pendingSeedArtist)
-                Thread.sleep(forTimeInterval: 1.0)
+        case .shuffle:
+            // Replay the just-played playlist shuffled, via the app-owned queue.
+            // Falls back to shuffling whatever's playing if there's no playlist name.
+            if !pendingPlaylist.isEmpty {
+                shufflePlayPlaylist(backend: backend, appQueue: appQueue, playlist: pendingPlaylist)
+            } else {
+                shufflePlayCurrent(backend: backend, appQueue: appQueue)
             }
-            createStationFromCurrentTrack(backend: backend)
         case .playlist:
             wantsPlaylists = true
         case .quiet:
+            appQueue.clear()
             _ = try? syncRun { try await self.backend.runMusic("pause") }
         }
     }
@@ -220,8 +228,13 @@ final class NowPlayingScene: Scene {
             cursor = min(max(0, rows.count - 1), cursor + 1); return .redraw
         case .enter:
             guard cursor < rows.count else { return .none }
-            // Jump to the selected track within the current playlist by its real index.
-            playTrackInCurrentPlaylist(backend: backend, index: rows[cursor].index)
+            // Jump within the app-owned queue by the row's play-order position; fall
+            // back to the native jump for album/library contexts (no app queue).
+            if let (pl, pos) = appQueue.jump(to: rows[cursor].index) {
+                playQueueTrack(backend: backend, playlist: pl, position: pos)
+            } else {
+                playTrackInCurrentPlaylist(backend: backend, index: rows[cursor].index)
+            }
             return .redraw
         case .left:
             _ = try? syncRun { try await self.backend.runMusic("set player position to (player position - 30)") }

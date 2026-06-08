@@ -4,11 +4,12 @@ import Foundation
 func runShell() {
     let backend = AppleScriptBackend()
     let store = NowPlayingStore()
-    let poller = PlaybackPoller(store: store, backend: backend)
+    let appQueue = AppQueueStore()
+    let poller = PlaybackPoller(store: store, backend: backend, appQueue: appQueue)
     let terminal = TerminalState.shared
 
     let router = Router(root: .nowPlaying)
-    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend)]
+    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue)]
     let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists"), (.speakers, "Speakers")]
 
     // Lazily build a scene the first time it's shown. Returns nil if it can't be
@@ -21,7 +22,8 @@ func runShell() {
             guard !names.isEmpty else { return nil }
             let scene = PlaylistsScene(backend: backend,
                                        playlists: names,
-                                       sources: makePlaylistDataSources(backend: backend, names: names))
+                                       sources: makePlaylistDataSources(backend: backend, names: names),
+                                       appQueue: appQueue)
             scenes[id] = scene
             return scene
         case .speakers:
@@ -36,6 +38,9 @@ func runShell() {
     terminal.enterRawMode()
     print(ANSICode.cursorHome + ANSICode.clearScreen, terminator: "")
     poller.start()
+    // Sweep temp queue playlists left by a prior session (sparing the one still
+    // playing). Off-main so a slow Music doesn't delay first paint.
+    DispatchQueue.global().async { sweepQueuePlaylists(backend: backend) }
     defer {
         poller.stop()
         terminal.exitRawMode()
@@ -89,10 +94,15 @@ func runShell() {
             case .playPause:  _ = try? syncRun { try await backend.runMusic("playpause") }
             case .volumeUp:   _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume + 5)") }
             case .volumeDown: _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume - 5)") }
-            case .next:       _ = try? syncRun { try await backend.runMusic("next track") }
-            case .prev:       _ = try? syncRun { try await backend.runMusic("previous track") }
-            case .shuffle:    _ = try? syncRun { try await backend.runMusic("set shuffle enabled to (not shuffle enabled)") }
-            case .radio:      createStationFromCurrentTrack(backend: backend); router.switchTo(.nowPlaying)
+            // next/prev drive the app-owned queue when one is active (the poller
+            // can't rely on Music's queue post-26.x); otherwise Music's own controls.
+            case .next:
+                if let (pl, pos) = appQueue.step(1) { playQueueTrack(backend: backend, playlist: pl, position: pos) }
+                else { _ = try? syncRun { try await backend.runMusic("next track") } }
+            case .prev:
+                if let (pl, pos) = appQueue.step(-1) { playQueueTrack(backend: backend, playlist: pl, position: pos) }
+                else { _ = try? syncRun { try await backend.runMusic("previous track") } }
+            case .shuffle:    shufflePlayCurrent(backend: backend, appQueue: appQueue)
             case .switchScene(let n):
                 if n >= 1 && n <= tabs.count, ensureScene(tabs[n - 1].id) != nil { router.switchTo(tabs[n - 1].id) }
             case .quit:       return
