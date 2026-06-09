@@ -135,7 +135,7 @@ Bare `music` is the only interactive surface — a tabbed shell with **Now**, **
 
 TUI behavior: the Now tab shows the current album context; selecting a playlist on the Playlists tab pins it on the Now tab. Cursor movement is local and fast.
 
-TUI controls: `↑↓` navigate the right pane, `Enter` play selected, `←→` seek, `Space` pause, `</>` previous/next track (full up/down through the playlist), `z`/`r` shuffle the queue, `+/-` volume, `s` speakers, `v` mixer, `q` quit. Playlist track-play requires Music's Autoplay (∞) turned OFF — it drives playback track-by-track and needs each track to stop at its end.
+TUI controls: `1/2/3` switch tabs (Now / Playlists / Speakers), `Tab` cycles tabs, `↑↓` navigate, `Enter` play/open selected, `←→` seek (Now) or volume (Speakers), `Space` pause, `</>` previous/next track (full up/down through the playlist), `z`/`r` shuffle, `+/-` volume, `n` next-up options (Now), `/` filter playlists, `Esc` back, `q` quit. Playlist track-play requires Music's Autoplay (∞) turned OFF — it drives playback track-by-track and needs each track to stop at its end.
 
 ## Result Cache
 

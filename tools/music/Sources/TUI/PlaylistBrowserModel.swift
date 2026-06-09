@@ -82,30 +82,6 @@ func playlistZones(width: Int) -> PlaylistZones {
     }
 }
 
-// MARK: - Enrichment queue
-
-/// Choose the next batch of unloaded playlist indices to enrich, visible rows
-/// first (in caller order), then the earliest remaining unloaded indices.
-/// `visible` is the list of actual playlist indices currently on screen — a
-/// list rather than a range so it stays correct when a filter makes the
-/// on-screen indices non-contiguous. Pure.
-func nextEnrichmentBatch(total: Int, loaded: Set<Int>, visible: [Int], batchSize: Int) -> [Int] {
-    var picks: [Int] = []
-    for i in visible where i >= 0 && i < total && !loaded.contains(i) {
-        picks.append(i)
-        if picks.count == batchSize { return picks }
-    }
-    let visibleSet = Set(visible)
-    var i = 0
-    while i < total && picks.count < batchSize {
-        if !loaded.contains(i) && !visibleSet.contains(i) {
-            picks.append(i)
-        }
-        i += 1
-    }
-    return picks
-}
-
 // MARK: - Gradient block (deterministic identity, not real artwork)
 
 private let gradientGlyphs = "\u{2588}\u{2593}\u{2592}\u{2591}"  // full/dark/medium/light shade

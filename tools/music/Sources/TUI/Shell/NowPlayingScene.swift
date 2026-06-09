@@ -132,11 +132,9 @@ final class NowPlayingScene: Scene {
             // Adapt context entries to the timeline-row shape the shared renderer expects.
             let timeline = rows.map { e in
                 TimelineRow(
-                    id: trackKey(title: e.name, artist: e.artist),
-                    kind: .playlist, index: e.index,
-                    title: e.name, artist: e.artist,
+                    index: e.index,
                     label: "\(e.name) \u{2014} \(e.artist)",
-                    isCurrent: e.isCurrent, wasPlayed: false, isReplayable: true
+                    isCurrent: e.isCurrent, wasPlayed: false
                 )
             }
             out += renderTimelineRows(
@@ -229,12 +227,16 @@ final class NowPlayingScene: Scene {
             cursor = min(max(0, rows.count - 1), cursor + 1); return .redraw
         case .enter:
             guard cursor < rows.count else { return .none }
-            // Jump within the app-owned queue by the row's play-order position; fall
-            // back to the native jump for album/library contexts (no app queue).
+            // Jump within the app-owned queue by the row's play-order position. For
+            // album/library contexts (no app queue), play the row by title/artist —
+            // `play track N of current playlist` is regressed on macOS 26.x (drops
+            // context to the library), so use the same library lookup the poller's
+            // auto-advance relies on. Duplicate titles resolve to the first match,
+            // the limitation the poller already accepts.
             if let (pl, pos) = appQueue.jump(to: rows[cursor].index) {
                 playQueueTrack(backend: backend, playlist: pl, position: pos)
             } else {
-                playTrackInCurrentPlaylist(backend: backend, index: rows[cursor].index)
+                playLibraryTrack(backend: backend, title: rows[cursor].name, artist: rows[cursor].artist)
             }
             return .redraw
         case .left:

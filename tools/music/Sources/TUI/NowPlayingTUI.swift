@@ -37,11 +37,6 @@ enum PollOutcome {
     case unavailable
 }
 
-/// Consecutive `.unavailable` polls tolerated before the UI falls back to the
-/// "stopped" screen. A single transient AppleScript hiccup must not blank a
-/// screen that is actually playing.
-private let unavailableBlankThreshold = 4
-
 func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> PollOutcome {
     guard let result = try? syncRun({
         try await backend.runMusic("""
@@ -220,17 +215,6 @@ func pollAlbumTracks(for np: NowPlayingState, backend: AppleScriptBackend = Appl
     }
 }
 
-func clearBlock(x: Int, y: Int, width: Int, height: Int) -> String {
-    guard width > 0, height > 0 else { return "" }
-    var out = ""
-    let blank = String(repeating: " ", count: width)
-    for row in y..<(y + height) {
-        out += ANSICode.moveTo(row: row, col: x)
-        out += blank
-    }
-    return out
-}
-
 func extractArtwork() -> String? {
     let artPath = "/tmp/music-now-art.dat"
     let backend = AppleScriptBackend()
@@ -343,46 +327,20 @@ func formatTime(_ seconds: Int) -> String {
     return String(format: "%d:%02d", m, s)
 }
 
-enum TimelineRowKind {
-    case playlist
-    case history
-    case queue
-}
-
 struct TimelineRow {
-    let id: String
-    let kind: TimelineRowKind
     let index: Int?
-    let title: String
-    let artist: String
     let label: String
     let isCurrent: Bool
     let wasPlayed: Bool
-    let isReplayable: Bool
-}
-
-func splitTrackLine(_ line: String) -> (title: String, artist: String) {
-    let parts = line.split(separator: "\u{2014}", maxSplits: 1).map {
-        $0.trimmingCharacters(in: .whitespaces)
-    }
-    let title = parts.first.map { String($0) } ?? line
-    let artist = parts.count > 1 ? String(parts[1]) : ""
-    return (title, artist)
 }
 
 func trackKey(title: String, artist: String) -> String {
     "\(title)\u{0}\(artist)"
 }
 
-func playTrackInCurrentPlaylist(backend: AppleScriptBackend, index: Int) {
-    _ = try? syncRun {
-        try await backend.runMusic("play track \(index) of current playlist")
-    }
-}
-
 func playLibraryTrack(backend: AppleScriptBackend, title: String, artist: String) {
-    let escapedTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-    let escapedArtist = artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    let escapedTitle = escapeAppleScriptString(title)
+    let escapedArtist = escapeAppleScriptString(artist)
     _ = try? syncRun {
         try await backend.runMusic("""
             set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")

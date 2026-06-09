@@ -19,15 +19,16 @@ struct Remove: ParsableCommand {
         }
         let title = String(parts[0])
         let artist = String(parts[1])
-        let escapedTitle = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedArtist = artist.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedTitle = escapeAppleScriptString(title)
+        let escapedArtist = escapeAppleScriptString(artist)
 
         func deleteTrack(from playlist: String) throws -> Bool {
+            let escapedPlaylist = escapeAppleScriptString(playlist)
             let check = try? syncRun {
                 try await backend.runMusic("""
-                    set matches to (every track of playlist "\(playlist)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
+                    set matches to (every track of playlist "\(escapedPlaylist)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
                     if (count of matches) = 0 then
-                        set matches to (every track of playlist "\(playlist)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
+                        set matches to (every track of playlist "\(escapedPlaylist)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
                     end if
                     if (count of matches) > 0 then
                         delete item 1 of matches

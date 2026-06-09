@@ -54,29 +54,6 @@ final class PlaylistBrowserModelTests: XCTestCase {
         XCTAssertNil(z.rightX)
     }
 
-    // enrichment batch selection
-    func testEnrichmentPrioritizesVisibleUnloaded() {
-        let batch = nextEnrichmentBatch(total: 20, loaded: [], visible: Array(10..<15), batchSize: 3)
-        XCTAssertEqual(batch, [10, 11, 12])
-    }
-    func testEnrichmentSkipsLoaded() {
-        let batch = nextEnrichmentBatch(total: 20, loaded: [10, 11], visible: Array(10..<15), batchSize: 3)
-        XCTAssertEqual(batch, [12, 13, 14])
-    }
-    func testEnrichmentFallsBackToNonVisibleWhenVisibleDone() {
-        let batch = nextEnrichmentBatch(total: 5, loaded: [2, 3, 4], visible: Array(2..<5), batchSize: 3)
-        XCTAssertEqual(batch, [0, 1])
-    }
-    func testEnrichmentVisibleNonContiguous() {
-        // Under an active filter the on-screen indices are non-contiguous;
-        // they must still be prioritized in caller order.
-        let batch = nextEnrichmentBatch(total: 20, loaded: [], visible: [3, 7, 9], batchSize: 2)
-        XCTAssertEqual(batch, [3, 7])
-    }
-    func testEnrichmentEmptyWhenAllLoaded() {
-        XCTAssertEqual(nextEnrichmentBatch(total: 3, loaded: [0, 1, 2], visible: Array(0..<3), batchSize: 5), [])
-    }
-
     // gradient determinism
     func testGradientDeterministicAndSized() {
         let a = gradientBlock(name: "House Classics", width: 12, height: 5)
