@@ -14,7 +14,7 @@ private final class StubScene: Scene {
 final class SceneInputModeTests: XCTestCase {
     func testDefaultIsFalse() {
         // NowPlayingScene does not override capturesAllInput.
-        let s = NowPlayingScene(backend: AppleScriptBackend())
+        let s = NowPlayingScene(backend: AppleScriptBackend(), appQueue: AppQueueStore())
         XCTAssertFalse(s.capturesAllInput)
     }
     func testShellRoutesGlobalsWhenNotCapturing() {

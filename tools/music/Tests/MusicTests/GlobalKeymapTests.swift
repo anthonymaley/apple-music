@@ -14,7 +14,7 @@ final class GlobalKeymapTests: XCTestCase {
         XCTAssertEqual(resolveGlobalKey(.char("<")), .prev)
         XCTAssertEqual(resolveGlobalKey(.f7), .prev)
         XCTAssertEqual(resolveGlobalKey(.char("z")), .shuffle)
-        XCTAssertEqual(resolveGlobalKey(.char("r")), .radio)
+        XCTAssertEqual(resolveGlobalKey(.char("r")), .shuffle)   // 'r' was radio; now shuffles
         XCTAssertEqual(resolveGlobalKey(.char("q")), .quit)
     }
     func testDigitsSwitchScene() {

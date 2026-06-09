@@ -32,56 +32,7 @@ final class TimelineRowsTests: XCTestCase {
         XCTAssertNotEqual(trackKey(title: "AB", artist: ""), trackKey(title: "A", artist: "B"))
     }
 
-    // MARK: - buildPlaylistRows (history overlay)
-
-    func testPlaylistRowsMarkCurrentAndPlayed() {
-        let tracks = ["Song1 \u{2014} Art1", "Song2 \u{2014} Art2", "Song3 \u{2014} Art3"]
-        let history = [(track: "Song1", artist: "Art1")]
-        let rows = buildPlaylistRows(contextTracks: tracks, history: history, currentIndex: 1)
-
-        XCTAssertEqual(rows.count, 3)
-        // 1-based playlist index preserved.
-        XCTAssertEqual(rows.map { $0.index }, [1, 2, 3])
-        // currentIndex 1 -> second row is current.
-        XCTAssertEqual(rows.map { $0.isCurrent }, [false, true, false])
-        // Only Song1 is in history -> wasPlayed overlay.
-        XCTAssertEqual(rows.map { $0.wasPlayed }, [true, false, false])
-    }
-
-    func testPlaylistRowsNoCurrentWhenIndexNil() {
-        let rows = buildPlaylistRows(contextTracks: ["A \u{2014} B"], history: [], currentIndex: nil)
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertFalse(rows[0].isCurrent)
-        XCTAssertFalse(rows[0].wasPlayed)
-    }
-
-    // MARK: - buildStandaloneRows (dedup history against the live surrounding list)
-
-    func testStandaloneRowsDedupHistoryAgainstSurrounding() {
-        // History contains A and B; B is also in the surrounding (live) list.
-        // The B history row must be suppressed (no duplicate), A kept as history.
-        let history = [(track: "A", artist: "ArtA"), (track: "B", artist: "ArtB")]
-        let surrounding = [
-            TrackListEntry(index: 5, name: "B", artist: "ArtB", isCurrent: true),
-            TrackListEntry(index: 6, name: "C", artist: "ArtC", isCurrent: false),
-        ]
-        let rows = buildStandaloneRows(history: history, surrounding: surrounding)
-
-        // Expected order: history (deduped, reversed) then surrounding.
-        // history.reversed() = [B, A]; B dropped (in surrounding) -> [A]; then B, C.
-        XCTAssertEqual(rows.map { $0.title }, ["A", "B", "C"])
-        XCTAssertEqual(rows.map { $0.kind }, [.history, .queue, .queue])
-        // B is current and was played; C neither; A is a played history row.
-        XCTAssertEqual(rows.map { $0.isCurrent }, [false, true, false])
-        XCTAssertEqual(rows.map { $0.wasPlayed }, [true, true, false])
-    }
-
-    func testStandaloneRowsEmptyHistory() {
-        let surrounding = [TrackListEntry(index: 1, name: "Only", artist: "Artist", isCurrent: true)]
-        let rows = buildStandaloneRows(history: [], surrounding: surrounding)
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows[0].title, "Only")
-        XCTAssertTrue(rows[0].isCurrent)
-        XCTAssertFalse(rows[0].wasPlayed)
-    }
+    // Note: buildPlaylistRows / buildStandaloneRows were removed in 1.11.0 along with the
+    // standalone music now/playlist TUIs; their tests were deleted with them. splitTrackLine
+    // and trackKey survive in NowPlayingTUI.swift (the music now CLI subcommand still parses tracks).
 }

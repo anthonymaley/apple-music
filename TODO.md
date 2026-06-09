@@ -2,9 +2,23 @@
 
 Current high-priority follow-ups before a broad public push.
 
-## Current Session (2026-06-08, evening — picked up after the 1.9.0 session)
+## Current Session (2026-06-08, late — repair drifted test suite) — DONE
 
-**Done (1.9.0 → 1.11.1, 5 commits, all on `main`, all pushed). Headline: the playlist track-play "regression" was Apple's, not ours, and is now routed around app-side.**
+**Done.** Restored the test target to compile + pass. `swift build` was green but `swift test` didn't compile — 4 test files had drifted against the 1.10.0/1.11.0 refactors (one more than the initial smoke test showed; the compiler halts per-file, hiding the rest). Test-only; no production change; no version bump. **Result: 85 tests, 0 failures, 14 suites.**
+
+- [x] `SceneInputModeTests.swift:17` — added `appQueue: AppQueueStore()` (`init(backend:appQueue:)`).
+- [x] `GlobalKeymapTests.swift:17` — `.radio` → `.shuffle` (`'r'` now aliases shuffle).
+- [x] `TimelineRowsTests.swift` — deleted the 4 `buildPlaylistRows`/`buildStandaloneRows` tests (removed in 1.11.0); kept `splitTrackLine`/`trackKey`.
+- [x] `QueueEndTests.swift:38-43` — continuation mapping: `s` → `.shuffle` (was `r` → `.radio`); `r` now nil. (Surfaced only after the first three compiled.)
+- [x] `swift test` → 85 passed, 0 failed. Playbook gotcha added (build-green ≠ test-green; iterate to true green).
+
+**Stale doc flagged (not in scope to fix here):** `docs/playbook.md` "Current Status" header still says 1.10.0 — shipped is 1.11.1. Candidate for `/kerd:trim` or a kivna pass.
+
+---
+
+## Backlog (from 1.9.0 → 1.11.1 session)
+
+**Headline of prior work: the playlist track-play "regression" was Apple's, not ours, and is now routed around app-side.**
 
 - **Root cause nailed (the user was right it used to work):** `play track N of playlist X` is REGRESSED in macOS 26.x — it drops `current playlist` to the library AND bleeds into Autoplay at track end. `play playlist X` resumes at a sticky position whose backward-nav floors there (can't reach track 1). A fresh temp-playlist copy ALSO starts mid-list and clutters iCloud (synced to the user's phone — confirmed live). No Music primitive gives "playlist at track N with full up/down".
 - **1.10.0 — app-owned playlist queue** (`Sources/TUI/Shell/AppQueue.swift`): the app holds the ordered track list and drives playback (play one track; `PlaybackPoller` plays the next when it stops; next/prev/Enter navigate our list). Full up/down restored, immune to the regression. **Hard dep: Music Autoplay (∞) must be OFF** (the `once` param is ignored). Verified live across 7 checks.

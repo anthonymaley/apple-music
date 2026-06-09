@@ -36,10 +36,10 @@ final class QueueEndTests: XCTestCase {
             prevNaturalEnd: true, nowIsLibraryAutoplay: false))
     }
     func testContinuationActionMapping() {
-        XCTAssertEqual(continuationAction(for: .char("r")), .radio)
+        XCTAssertEqual(continuationAction(for: .char("s")), .shuffle)
         XCTAssertEqual(continuationAction(for: .char("p")), .playlist)
         XCTAssertEqual(continuationAction(for: .char("q")), .quiet)
-        XCTAssertNil(continuationAction(for: .char("s")))
+        XCTAssertNil(continuationAction(for: .char("r")))   // 'r' was radio; no longer a continuation key
         XCTAssertNil(continuationAction(for: .up))
     }
 }
