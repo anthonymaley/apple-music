@@ -2,32 +2,25 @@
 
 Current high-priority follow-ups before a broad public push.
 
-## Current Session (2026-06-08)
+## Current Session (2026-06-08, evening — picked up after the 1.9.0 session)
 
-**Done this session (v1.8.0 → 1.9.0, 48 commits, all on main, all pushed):**
-- **Unified TUI shell** — bare `music` now launches one navigable app (was a pile of one-shot screens). Built spec→plan→subagent-driven across milestones:
-  - **M1 (spine):** background `PlaybackPoller` thread + lock-guarded `NowPlayingStore`, single `runShell` loop, `Router` (scene stack), `ShellFrame` (degradation tiers), global keymap, `Scene` protocol, Now Playing scene. Auto-advance/history/album-context moved into the poller.
-  - **M2 (Playlists scene):** v1.8.0 3-zone browser pulled into the shell as tab 2; `PlaylistDataSources` factory; `capturesAllInput` for filter text-entry.
-  - **M2b (Speakers scene):** merged the AirPlay picker + per-speaker volume mixer into one tab 3.
-  - Shipped **1.9.0** (4 version locations).
-  - **M3 (Now Playing rework + Playlists polish):** real album-art hero (`extractArtwork`+chafa) + Up Next from playback context; two-pane layout (art/meta left, Up Next right); highlight-line track rows (consistent indent, lime ▶ current, inverse cursor) with capped width; bigger art; Playlists preview fills the pane; current marked by index not title.
-  - **End-of-queue continuation:** pure detection guard + card menu (Radio / Playlist / Quiet) + manual `n` trigger; fires on STOP (the common case), not just autoplay-to-library.
-- **Architecture research** (ultracode workflow, 37 agents, verified vs Apple docs + live): VERDICT = **AppleScript (control) + REST (data) is the only viable stack.** MusicKit/MediaPlayer/MediaRemote/browser all rejected (native-macOS-unavailable / paid-dev-account entitlement / private API). Saved to memory [[project_apple_music_integration_architecture]].
+**Done (1.9.0 → 1.11.1, 5 commits, all on `main`, all pushed). Headline: the playlist track-play "regression" was Apple's, not ours, and is now routed around app-side.**
 
-**⚠ In progress — committed but NOT verified live (the next session MUST confirm before claiming fixed):**
-- **R5 playlist context** — `play track N of playlist X` collapses `current playlist` to the library (26.x regression, reproduced live). Fix (`521ffef`): play a temp `__queue__` tail playlist instead. The user's last screenshot was the OLD binary — fix not yet tested.
-- **Native radio** (`r` / `[R]`) — Create Station via System Events GUI-click. Works from Terminal manually (activate-first). From the `music` binary: Music activates but the **click is a no-op** → almost certainly the binary lacks **Accessibility** permission (a stricter TCC category than Apple Events). Likely a hard wall. Do NOT ship a 4th same-shape patch (see shame point below).
-- **Bottom now-playing bar removed** (`d1e7f84`) per user — playback lives on the Now tab. Not yet seen live.
+- **Root cause nailed (the user was right it used to work):** `play track N of playlist X` is REGRESSED in macOS 26.x — it drops `current playlist` to the library AND bleeds into Autoplay at track end. `play playlist X` resumes at a sticky position whose backward-nav floors there (can't reach track 1). A fresh temp-playlist copy ALSO starts mid-list and clutters iCloud (synced to the user's phone — confirmed live). No Music primitive gives "playlist at track N with full up/down".
+- **1.10.0 — app-owned playlist queue** (`Sources/TUI/Shell/AppQueue.swift`): the app holds the ordered track list and drives playback (play one track; `PlaybackPoller` plays the next when it stops; next/prev/Enter navigate our list). Full up/down restored, immune to the regression. **Hard dep: Music Autoplay (∞) must be OFF** (the `once` param is ignored). Verified live across 7 checks.
+- **1.10.1 — playlist rail metadata cache** (`~/.config/music/playlist-meta.json`): seed instantly + refresh off-thread with retry. (A batch transiently failed under startup load, blanking 8 rows → fixed with per-clause `try` + retry-with-backoff.)
+- **1.11.0 — removed the standalone TUIs + radio** (~1500 lines). Bare `music` is the only TUI now. Radio (Accessibility-walled) gone, **shuffle** in its place (`z`/`r` + end-of-queue `[S]`). Kept every CLI utility subcommand (statusline uses `music now --json`).
+- **1.11.1 — scene-aware footer** (each tab's keys + global playback keys) + **prominent ♪ playlist name** on the Now tab.
+- Docs reconciled (radio/standalone-TUI refs removed); `docs/playbook.md` + project memory updated with the regression + Autoplay-off + app-owned-queue + cache-batch gotchas.
 
-**What's next:**
-1. **User reinstalls** (`scripts/install.sh`) and verifies R5 (does playlist context hold?), the bar removal, and radio — the last screenshot predates all three.
-2. **R5:** if Up Next still shows the alphabetical library after reinstall, the temp-queue approach also fails → document R5 as a platform limit.
-3. **Radio:** if `r` still no-ops after Music activates → confirmed Accessibility wall → decide **home-built mix** vs **document as manual**. Don't keep patching Swift.
-4. **Bump 1.10.0** only after R5 + radio are settled (folds in M3 + end-of-queue + R5 + bar removal).
+**What's next (all optional — nothing blocking):**
+1. **Album-context Enter-jump** still uses the broken `play track N of current playlist` (playlists fixed; albums not) — apply the app-owned-queue treatment or accept.
+2. Prune the orphaned `nextEnrichmentBatch` in `Sources/TUI/PlaylistBrowserModel.swift` (dead after the cache refactor).
+3. Confirm the synced `__queue__` playlists are fully gone from the user's phone (the launch sweep should have cleared them).
 
 ### Context
-- **Decision:** keep AppleScript+REST; MusicKit/MediaPlayer/browser are evaluated-and-rejected (memory). R5/R6(radio)/R7(real queue) are platform/permission gaps, not bugs.
-- **The 89 unit tests are pure-model only** (zones/parsing/router/frame math) — they prove NOTHING about playback context, AirPlay, radio, or permissions. Build-green ≠ live-verified. (Shame point captured this session: `green-build-is-not-a-live-fix` — I shipped 3 fixes on green builds, each failing live.)
+- **Decision locked:** don't rely on Music's queue for playlists — own it (`AppQueue`). AppleScript+REST stack unchanged. Radio removed (permission wall), not chased.
+- **Autoplay-OFF is a real runtime dependency** and is NOT scriptable (absent from the sdef) — documented in README/SKILL/playbook; cannot be detected/warned programmatically.
 - Worked directly on `main` (project convention). `docs/playlist-browser-ui.md` + `.claude/` intentionally untracked.
 
 ## TUI Polish
