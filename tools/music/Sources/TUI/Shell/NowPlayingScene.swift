@@ -3,11 +3,13 @@ import Foundation
 
 enum ContinuationAction: Equatable { case shuffle, playlist, quiet }
 
+/// `q` is deliberately NOT a continuation key: globally it means quit, and a
+/// user pressing `q` at a queue-ended TUI must leave the app, not pause it.
 func continuationAction(for key: KeyPress) -> ContinuationAction? {
     switch key {
     case .char("s"), .char("S"): return .shuffle
     case .char("p"), .char("P"): return .playlist
-    case .char("q"), .char("Q"): return .quiet
+    case .char("x"), .char("X"): return .quiet
     default: return nil
     }
 }
@@ -19,6 +21,8 @@ final class NowPlayingScene: Scene {
 
     private let backend: AppleScriptBackend
     private let appQueue: AppQueueStore
+    private let status: StatusStore
+    private let actions: ActionRunner
     private var cursor = 0
     private var scroll = 0
     private var rows: [TrackListEntry] = []
@@ -31,9 +35,11 @@ final class NowPlayingScene: Scene {
     private var pendingFromStopped = false   // menu opened from an auto queue-end (playback stopped)
     private var wantsPlaylists = false
 
-    init(backend: AppleScriptBackend, appQueue: AppQueueStore) {
+    init(backend: AppleScriptBackend, appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
         self.backend = backend
         self.appQueue = appQueue
+        self.status = status
+        self.actions = actions
     }
 
     // Once the user acts on an auto-detected queue-end, remember which one (by its
@@ -178,7 +184,7 @@ final class NowPlayingScene: Scene {
         let opts: [(String, String)] = [
             ("[S]", "Shuffle  \(ANSICode.dim)\(truncText(shuffleTarget, to: 28))\(ANSICode.reset)"),
             ("[P]", "Playlist  \(ANSICode.dim)browse\(ANSICode.reset)"),
-            ("[Q]", "Quiet  \(ANSICode.dim)stop here\(ANSICode.reset)"),
+            ("[X]", "Quiet  \(ANSICode.dim)stop here\(ANSICode.reset)"),
         ]
         for (key, label) in opts {
             out += ANSICode.moveTo(row: ly, col: lx) + "\(ANSICode.lime)\(key)\(ANSICode.reset)  \(label)"
@@ -192,16 +198,22 @@ final class NowPlayingScene: Scene {
         case .shuffle:
             // Replay the just-played playlist shuffled, via the app-owned queue.
             // Falls back to shuffling whatever's playing if there's no playlist name.
-            if !pendingPlaylist.isEmpty {
-                shufflePlayPlaylist(backend: backend, appQueue: appQueue, playlist: pendingPlaylist)
-            } else {
-                shufflePlayCurrent(backend: backend, appQueue: appQueue)
+            // On the action queue: shufflePlayPlaylist bulk-fetches the whole
+            // playlist, which must not stall the input loop.
+            let playlist = pendingPlaylist
+            let backend = self.backend
+            let appQueue = self.appQueue
+            actions.run("Shuffle") {
+                let ok = playlist.isEmpty
+                    ? shufflePlayCurrent(backend: backend, appQueue: appQueue)
+                    : shufflePlayPlaylist(backend: backend, appQueue: appQueue, playlist: playlist)
+                try require(ok, "Shuffle failed.")
             }
         case .playlist:
             wantsPlaylists = true
         case .quiet:
             appQueue.clear()
-            _ = try? syncRun { try await self.backend.runMusic("pause") }
+            actions.run("Pause") { _ = try syncRun { try await self.backend.runMusic("pause") } }
         }
     }
 
@@ -215,8 +227,16 @@ final class NowPlayingScene: Scene {
                 if wantsPlaylists { wantsPlaylists = false; return .push(.playlists) }
                 return .redraw
             }
-            // any other key dismisses the manual menu (auto menu stays until poller clears it)
-            if case .escape = key { manualMenu = false; return .redraw }
+            // The menu captures all input, so quit must be honored here — `q` at
+            // a queue-ended TUI means "leave the app", never a menu action.
+            if case .char("q") = key { return .quit }
+            // Esc dismisses the menu — manual or auto (the auto menu is keyed by
+            // its ended track, so it won't re-appear for the same queue-end).
+            if case .escape = key {
+                manualMenu = false
+                dismissedSeed = pendingSeedTitle
+                return .redraw
+            }
         }
         // Manual open: 'n' (next-options) when no menu is up.
         if case .char("n") = key, !menuShownLastFrame {
@@ -237,17 +257,19 @@ final class NowPlayingScene: Scene {
             // context to the library), so use the same library lookup the poller's
             // auto-advance relies on. Duplicate titles resolve to the first match,
             // the limitation the poller already accepts.
+            let backend = self.backend
             if let (pl, pos) = appQueue.jump(to: rows[cursor].index) {
-                playQueueTrack(backend: backend, playlist: pl, position: pos)
+                actions.run("Play") { try require(playQueueTrack(backend: backend, playlist: pl, position: pos), "Couldn't play that track.") }
             } else {
-                playLibraryTrack(backend: backend, title: rows[cursor].name, artist: rows[cursor].artist)
+                let row = rows[cursor]
+                actions.run("Play") { try require(playLibraryTrack(backend: backend, title: row.name, artist: row.artist), "'\(row.name)' not found in the library.") }
             }
             return .redraw
         case .left:
-            _ = try? syncRun { try await self.backend.runMusic("set player position to (player position - 30)") }
+            actions.run("Seek") { _ = try syncRun { try await self.backend.runMusic("set player position to (player position - 30)") } }
             return .redraw
         case .right:
-            _ = try? syncRun { try await self.backend.runMusic("set player position to (player position + 30)") }
+            actions.run("Seek") { _ = try syncRun { try await self.backend.runMusic("set player position to (player position + 30)") } }
             return .redraw
         default:
             return .none

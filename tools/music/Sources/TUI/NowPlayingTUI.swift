@@ -307,18 +307,26 @@ func trackKey(title: String, artist: String) -> String {
     "\(title)\u{0}\(artist)"
 }
 
-func playLibraryTrack(backend: AppleScriptBackend, title: String, artist: String) {
+/// Returns false when the script failed OR no library track matched — the
+/// caller can surface "not found" instead of silently doing nothing.
+@discardableResult
+func playLibraryTrack(backend: AppleScriptBackend, title: String, artist: String) -> Bool {
     let escapedTitle = escapeAppleScriptString(title)
     let escapedArtist = escapeAppleScriptString(artist)
-    _ = try? syncRun {
+    guard let result = try? syncRun({
         try await backend.runMusic("""
             set results to (every track of playlist "Library" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
             if (count of results) = 0 then
                 set results to (every track of playlist "Library" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
             end if
-            if (count of results) > 0 then play item 1 of results
+            if (count of results) > 0 then
+                play item 1 of results
+                return "PLAYED"
+            end if
+            return "NONE"
         """)
-    }
+    }) else { return false }
+    return result.trimmingCharacters(in: .whitespacesAndNewlines) == "PLAYED"
 }
 
 func renderTimelineRows(

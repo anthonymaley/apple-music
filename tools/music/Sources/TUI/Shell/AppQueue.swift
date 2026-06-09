@@ -60,9 +60,10 @@ final class AppQueueStore {
 /// Autoplay off this plays the one track and stops at its end, letting the poller
 /// drive the next. `current playlist` collapsing to the library (the 26.x bug) is
 /// irrelevant here — the app owns the queue, not Music.
-func playQueueTrack(backend: AppleScriptBackend, playlist: String, position: Int) {
+@discardableResult
+func playQueueTrack(backend: AppleScriptBackend, playlist: String, position: Int) -> Bool {
     let esc = escapeAppleScriptString(playlist)
-    _ = try? syncRun { try await backend.runMusic("play track \(position) of playlist \"\(esc)\"") }
+    return (try? syncRun { try await backend.runMusic("play track \(position) of playlist \"\(esc)\"") }) != nil
 }
 
 /// Bulk-fetch a playlist's full ordered track list (name + artist per row). Two
@@ -108,23 +109,23 @@ func appQueueWindow(_ q: AppQueue) -> (tracks: [TrackListEntry], name: String) {
 /// Shuffle: when an app queue is active, reshuffle its play order and restart from
 /// the new first track. With no app queue, fall back to toggling Music's native
 /// shuffle (e.g. while browsing, affecting whatever Music plays next).
-func shufflePlayCurrent(backend: AppleScriptBackend, appQueue: AppQueueStore) {
+@discardableResult
+func shufflePlayCurrent(backend: AppleScriptBackend, appQueue: AppQueueStore) -> Bool {
     guard let q = appQueue.read() else {
-        _ = try? syncRun { try await backend.runMusic("set shuffle enabled to (not shuffle enabled)") }
-        return
+        return (try? syncRun { try await backend.runMusic("set shuffle enabled to (not shuffle enabled)") }) != nil
     }
     let reordered = q.tracks.shuffled()
     appQueue.set(AppQueue(playlistName: q.playlistName, tracks: reordered, currentIndex: 1))
-    if let first = reordered.first {
-        playQueueTrack(backend: backend, playlist: q.playlistName, position: first.index)
-    }
+    guard let first = reordered.first else { return false }
+    return playQueueTrack(backend: backend, playlist: q.playlistName, position: first.index)
 }
 
 /// Build a fresh app queue from a playlist in shuffled order and play its first
 /// track. Used by the end-of-queue "Shuffle" action to replay a finished playlist.
-func shufflePlayPlaylist(backend: AppleScriptBackend, appQueue: AppQueueStore, playlist: String) {
+@discardableResult
+func shufflePlayPlaylist(backend: AppleScriptBackend, appQueue: AppQueueStore, playlist: String) -> Bool {
     let tracks = fetchPlaylistTracks(backend: backend, playlist: playlist).shuffled()
-    guard let first = tracks.first else { return }
+    guard let first = tracks.first else { return false }
     appQueue.set(AppQueue(playlistName: playlist, tracks: tracks, currentIndex: 1))
-    playQueueTrack(backend: backend, playlist: playlist, position: first.index)
+    return playQueueTrack(backend: backend, playlist: playlist, position: first.index)
 }

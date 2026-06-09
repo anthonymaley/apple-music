@@ -38,7 +38,8 @@ final class QueueEndTests: XCTestCase {
     func testContinuationActionMapping() {
         XCTAssertEqual(continuationAction(for: .char("s")), .shuffle)
         XCTAssertEqual(continuationAction(for: .char("p")), .playlist)
-        XCTAssertEqual(continuationAction(for: .char("q")), .quiet)
+        XCTAssertEqual(continuationAction(for: .char("x")), .quiet)
+        XCTAssertNil(continuationAction(for: .char("q")))   // 'q' must stay quit, even with the menu up
         XCTAssertNil(continuationAction(for: .char("r")))   // 'r' was radio; no longer a continuation key
         XCTAssertNil(continuationAction(for: .up))
     }

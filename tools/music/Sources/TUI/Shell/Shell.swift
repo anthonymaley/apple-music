@@ -5,11 +5,14 @@ func runShell() {
     let backend = AppleScriptBackend()
     let store = NowPlayingStore()
     let appQueue = AppQueueStore()
+    let status = StatusStore()
+    let actions = ActionRunner(status: status)
+    let volumeDelta = DeltaAccumulator()
     let poller = PlaybackPoller(store: store, backend: backend, appQueue: appQueue)
     let terminal = TerminalState.shared
 
     let router = Router(root: .nowPlaying)
-    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue)]
+    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions)]
     let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists"), (.speakers, "Speakers")]
 
     // Lazily build a scene the first time it's shown. Returns nil if it can't be
@@ -23,16 +26,24 @@ func runShell() {
             let scene = PlaylistsScene(backend: backend,
                                        playlists: names,
                                        sources: makePlaylistDataSources(backend: backend, names: names),
-                                       appQueue: appQueue)
+                                       appQueue: appQueue,
+                                       status: status,
+                                       actions: actions)
             scenes[id] = scene
             return scene
         case .speakers:
-            let scene = SpeakersScene(backend: backend)
+            let scene = SpeakersScene(backend: backend, status: status, actions: actions)
             scenes[id] = scene
             return scene
         default:
             return nil
         }
+    }
+
+    // Refusing a tab switch must say why — a dead keypress reads as a broken key.
+    func switchOrExplain(_ id: SceneID) {
+        if ensureScene(id) != nil { router.switchTo(id) }
+        else { status.post("No playlists found.", error: true) }
     }
 
     terminal.enterRawMode()
@@ -56,6 +67,7 @@ func runShell() {
     // key, or a resize. The loop still spins at the input-poll cadence (~10/s),
     // but idle iterations skip the full-screen truecolor repaint.
     var lastGeneration = -1
+    var lastToast: StatusToast? = nil
     var needsRender = true
 
     while true {
@@ -69,6 +81,12 @@ func runShell() {
         let (snap, generation) = store.readWithGeneration()
         if generation != lastGeneration {
             lastGeneration = generation
+            needsRender = true
+        }
+        // Toast appearing, changing, or expiring all repaint the footer.
+        let toast = status.current()
+        if toast != lastToast {
+            lastToast = toast
             needsRender = true
         }
         let (w, h) = dims()
@@ -87,9 +105,15 @@ func runShell() {
             // the Now tab. Just the footer hint line at the bottom.
             // Footer = tab nav + the active scene's own keys + the always-on playback
             // globals (so shuffle/skip/volume are discoverable from any tab).
-            let globals = "Space \u{23EF}  < > Skip  z Shuffle  +/\u{2212} Vol"
             out += ANSICode.moveTo(row: frame.footerY, col: 3) + ANSICode.clearLine
-            out += "\(ANSICode.dim)1/2/3 Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
+            if let t = toast {
+                // The toast borrows the footer line until it expires.
+                let color = t.isError ? ANSICode.red : ANSICode.amber
+                out += "\(color)\(truncText(t.text, to: max(1, frame.width - 4)))\(ANSICode.reset)"
+            } else {
+                let globals = "Space \u{23EF}  < > Skip  z Shuffle  +/\u{2212} Vol"
+                out += "\(ANSICode.dim)1/2/3 Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
+            }
             // Synchronized output (terminals that don't support it ignore the
             // escapes): the clear-then-paint inside one frame can't tear.
             print("\u{1B}[?2026h" + out + "\u{1B}[?2026l", terminator: "")
@@ -111,23 +135,39 @@ func runShell() {
             continue
         }
 
-        // 1) Globals (work in every non-capturing scene).
+        // 1) Globals (work in every non-capturing scene). Each runs on the serial
+        //    action queue so the input loop never blocks on osascript; failures
+        //    surface as a footer toast instead of vanishing into `try?`.
         if let action = resolveGlobalKey(key) {
             switch action {
-            case .playPause:  _ = try? syncRun { try await backend.runMusic("playpause") }
-            case .volumeUp:   _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume + 5)") }
-            case .volumeDown: _ = try? syncRun { try await backend.runMusic("set sound volume to (sound volume - 5)") }
+            case .playPause:
+                actions.run("Play/pause") { _ = try syncRun { try await backend.runMusic("playpause") } }
+            case .volumeUp, .volumeDown:
+                // Coalesced: holding the key accumulates one delta, applied once.
+                volumeDelta.add(action == .volumeUp ? 5 : -5)
+                actions.run("Volume") {
+                    let d = volumeDelta.take()
+                    guard d != 0 else { return }
+                    _ = try syncRun { try await backend.runMusic("set sound volume to (sound volume + \(d))") }
+                }
             // next/prev drive the app-owned queue when one is active (the poller
             // can't rely on Music's queue post-26.x); otherwise Music's own controls.
             case .next:
-                if let (pl, pos) = appQueue.step(1) { playQueueTrack(backend: backend, playlist: pl, position: pos) }
-                else { _ = try? syncRun { try await backend.runMusic("next track") } }
+                if let (pl, pos) = appQueue.step(1) {
+                    actions.run("Play") { try require(playQueueTrack(backend: backend, playlist: pl, position: pos), "Couldn't play that track.") }
+                } else {
+                    actions.run("Skip") { _ = try syncRun { try await backend.runMusic("next track") } }
+                }
             case .prev:
-                if let (pl, pos) = appQueue.step(-1) { playQueueTrack(backend: backend, playlist: pl, position: pos) }
-                else { _ = try? syncRun { try await backend.runMusic("previous track") } }
-            case .shuffle:    shufflePlayCurrent(backend: backend, appQueue: appQueue)
+                if let (pl, pos) = appQueue.step(-1) {
+                    actions.run("Play") { try require(playQueueTrack(backend: backend, playlist: pl, position: pos), "Couldn't play that track.") }
+                } else {
+                    actions.run("Back") { _ = try syncRun { try await backend.runMusic("previous track") } }
+                }
+            case .shuffle:
+                actions.run("Shuffle") { try require(shufflePlayCurrent(backend: backend, appQueue: appQueue), "Shuffle failed.") }
             case .switchScene(let n):
-                if n >= 1 && n <= tabs.count, ensureScene(tabs[n - 1].id) != nil { router.switchTo(tabs[n - 1].id) }
+                if n >= 1 && n <= tabs.count { switchOrExplain(tabs[n - 1].id) }
             case .quit:       return
             }
             continue
@@ -136,8 +176,7 @@ func runShell() {
         // 2) Tab cycles scenes.
         if case .char("\t") = key {
             if let idx = tabs.firstIndex(where: { $0.id == router.active }) {
-                let nextId = tabs[(idx + 1) % tabs.count].id
-                if ensureScene(nextId) != nil { router.switchTo(nextId) }
+                switchOrExplain(tabs[(idx + 1) % tabs.count].id)
             }
             continue
         }

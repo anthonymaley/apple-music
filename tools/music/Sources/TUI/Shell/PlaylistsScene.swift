@@ -16,6 +16,8 @@ final class PlaylistsScene: Scene {
     private let playlists: [String]
     private let sources: PlaylistDataSources
     private let appQueue: AppQueueStore
+    private let status: StatusStore
+    private let actions: ActionRunner
 
     private var focus: BrowserFocus = .playlists
     private var plCursor = 0
@@ -26,7 +28,6 @@ final class PlaylistsScene: Scene {
     private var loaded: Set<Int> = []
     private var fullCache: [Int: PlaylistPreview] = [:]
     private var previewLines: [Int: [String]] = [:]
-    private var lastLoadedPl = -1
     private var filterText = ""
     private var filtering = false
 
@@ -45,13 +46,20 @@ final class PlaylistsScene: Scene {
     private var previewInbox: [Int: [String]] = [:]
     private var previewInFlight: Set<Int> = []   // tick()-thread only
 
+    // Full track lists land the same way (Enter kicks the fetch, tick drains).
+    private var fullInbox: [Int: PlaylistPreview] = [:]   // guarded by previewInboxLock
+    private var fullInFlight: Set<Int> = []               // tick()/handle()-thread only
+
     private let metaCol = 6
 
-    init(backend: AppleScriptBackend, playlists: [String], sources: PlaylistDataSources, appQueue: AppQueueStore) {
+    init(backend: AppleScriptBackend, playlists: [String], sources: PlaylistDataSources,
+         appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
         self.backend = backend
         self.playlists = playlists
         self.sources = sources
         self.appQueue = appQueue
+        self.status = status
+        self.actions = actions
         self.meta = playlists.map { PlaylistMeta(name: $0) }
         // Seed the rail from the on-disk cache so it paints fully on first frame;
         // a background pass then refreshes every playlist and rewrites the cache.
@@ -121,11 +129,25 @@ final class PlaylistsScene: Scene {
         if !vis.contains(plCursor) { plCursor = vis.first ?? 0 }
         plScroll = 0
     }
+    /// Kick the full track-list fetch off-thread (inbox pattern); the tracks
+    /// pane shows "Loading…" until it lands. The old synchronous version froze
+    /// the whole shell for the duration of a 200-track fetch on Enter.
     private func loadFull() {
-        guard plCursor != lastLoadedPl else { return }
-        lastLoadedPl = plCursor
-        if fullCache[plCursor] == nil { fullCache[plCursor] = sources.onTracks(plCursor) }
         trCursor = 0; trScroll = 0
+        guard fullCache[plCursor] == nil, !fullInFlight.contains(plCursor) else { return }
+        fullInFlight.insert(plCursor)
+        let idx = plCursor
+        let name = playlists[plCursor]
+        let sources = self.sources
+        let status = self.status
+        previewQueue.async { [weak self] in
+            let preview = sources.onTracks(idx)
+            if preview == nil { status.post("Couldn't load tracks for '\(name)'.", error: true) }
+            guard let self else { return }
+            self.previewInboxLock.lock()
+            self.fullInbox[idx] = preview ?? PlaylistPreview(name: name, trackCount: 0, tracks: [])
+            self.previewInboxLock.unlock()
+        }
     }
     private func badgeText(_ m: PlaylistMeta) -> (String, String)? {
         switch playlistBadge(name: m.name, isSmart: m.isSmart ?? false, specialKind: m.specialKind ?? "none") {
@@ -153,13 +175,19 @@ final class PlaylistsScene: Scene {
             loaded.insert(idx)
             changed = true
         }
-        // Landed preview fetches.
+        // Landed preview and full-track fetches.
         previewInboxLock.lock()
         let freshPreviews = previewInbox; previewInbox = [:]
+        let freshFull = fullInbox; fullInbox = [:]
         previewInboxLock.unlock()
         for (idx, lines) in freshPreviews {
             previewLines[idx] = lines
             previewInFlight.remove(idx)
+            changed = true
+        }
+        for (idx, preview) in freshFull {
+            fullCache[idx] = preview
+            fullInFlight.remove(idx)
             changed = true
         }
         // Kick off a preview fetch (off-thread) when the pane is shown and empty.
@@ -231,7 +259,7 @@ final class PlaylistsScene: Scene {
             if focus == .playlists {
                 let vis = visibleIndices()
                 if let pos = vis.firstIndex(of: plCursor), pos < vis.count - 1 { plCursor = vis[pos + 1] }
-            } else { trCursor = min(trackCount - 1, trCursor + 1) }
+            } else { trCursor = min(max(0, trackCount - 1), trCursor + 1) }
             return .redraw
         case .char("/"):
             filtering = true
@@ -241,6 +269,7 @@ final class PlaylistsScene: Scene {
                 loadFull(); focus = .tracks; trCursor = 0; trScroll = 0
                 return .redraw
             } else {
+                guard fullCache[plCursor] != nil else { return .none }   // still loading
                 playTrack(trCursor)
                 return .push(.nowPlaying)
             }
@@ -268,17 +297,19 @@ final class PlaylistsScene: Scene {
         // playlist X`, so instead of leaning on Music's queue we hold the playlist
         // ourselves: fetch its tracks, register the queue at position N, and play
         // that one track. The poller advances when it stops at end (Music Autoplay
-        // must be off), and next/prev/Enter navigate our list — full up/down. Off-main
-        // so the bulk track fetch never freezes the UI; the poller reflects playback.
+        // must be off), and next/prev/Enter navigate our list — full up/down. On the
+        // action queue so the bulk track fetch never freezes the UI and failures
+        // surface as a toast instead of a silent dead Enter.
         let name = playlists[plCursor]
         let pos = trackIndex + 1
         let store = self.appQueue
         let backend = self.backend
-        DispatchQueue.global().async {
+        actions.run("Play") {
             let tracks = fetchPlaylistTracks(backend: backend, playlist: name)
-            guard !tracks.isEmpty, pos >= 1, pos <= tracks.count else { return }
+            try require(!tracks.isEmpty, "Couldn't load tracks for '\(name)'.")
+            try require(pos >= 1 && pos <= tracks.count, "Track \(pos) is out of range.")
             store.set(AppQueue(playlistName: name, tracks: tracks, currentIndex: pos))
-            playQueueTrack(backend: backend, playlist: name, position: pos)
+            try require(playQueueTrack(backend: backend, playlist: name, position: pos), "Couldn't play '\(name)'.")
         }
     }
     private func playPlaylist(shuffle: Bool) {
@@ -286,8 +317,12 @@ final class PlaylistsScene: Scene {
         // app-owned queue so the poller reads Music's context again.
         appQueue.clear()
         let esc = escapeAppleScriptString(playlists[plCursor])
-        _ = try? syncRun { try await self.backend.runMusic("set shuffle enabled to \(shuffle)") }
-        _ = try? syncRun { try await self.backend.runMusic("play playlist \"\(esc)\"") }
+        let name = playlists[plCursor]
+        actions.run("Play") {
+            _ = try? syncRun { try await self.backend.runMusic("set shuffle enabled to \(shuffle)") }
+            try require((try? syncRun { try await self.backend.runMusic("play playlist \"\(esc)\"") }) != nil,
+                        "Couldn't play '\(name)'.")
+        }
     }
 
     // MARK: render helpers (relocated from runPlaylistBrowser, region-relative)
@@ -393,6 +428,10 @@ final class PlaylistsScene: Scene {
         let tracks = fullCache[plCursor]?.tracks ?? []
         out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.cyan)Tracks\(ANSICode.reset) \(ANSICode.dim)\(tracks.count)\(ANSICode.reset)"; y += 1
         out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: min(z.rightWidth, 18)))\(ANSICode.reset)"; y += 1
+        if fullCache[plCursor] == nil {
+            out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.dim)Loading\u{2026}\(ANSICode.reset)"
+            return
+        }
         let maxVis = max(1, bodyBottom - y)
         if trCursor < trScroll { trScroll = trCursor }
         if trCursor >= trScroll + maxVis { trScroll = trCursor - maxVis + 1 }
