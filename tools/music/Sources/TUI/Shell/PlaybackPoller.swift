@@ -39,6 +39,10 @@ final class PlaybackPoller {
     private var endedTrack = ""
     private var endedArtist = ""
     private var endedArtLines: [String] = []
+    // Rendered art per album|artist. Consecutive tracks of the same album skip
+    // the extract+chafa round-trip entirely; empty results are cached too so an
+    // artless album isn't re-extracted on every track change.
+    private var artCache: [String: [String]] = [:]
 
     init(store: NowPlayingStore, backend: AppleScriptBackend, appQueue: AppQueueStore, intervalMs: UInt32 = 1000) {
         self.store = store
@@ -79,6 +83,15 @@ final class PlaybackPoller {
         finished.signal()
     }
 
+    /// The current working state as a publishable snapshot.
+    private func snapshot(outcome: PollOutcome) -> NowPlayingSnapshot {
+        NowPlayingSnapshot(
+            outcome: outcome, history: history, surrounding: surrounding,
+            contextName: contextName, artLines: artLines,
+            queueEnded: qEnded, endedPlaylist: endedPlaylist,
+            endedTrack: endedTrack, endedArtist: endedArtist, endedArtLines: endedArtLines)
+    }
+
     func tick() {
         switch pollNowPlaying(backend: backend) {
         case .active(let np):
@@ -104,6 +117,15 @@ final class PlaybackPoller {
                 lastTrack = np.track
                 lastArtist = np.artist
 
+                // Publish the new track's metadata immediately — with cached art
+                // when the album is known, blank otherwise — so the UI reflects
+                // the change within one poll cycle instead of waiting on the
+                // context fetch + artwork extraction below (the slow chain).
+                let artKey = "\(np.album)\u{0}\(np.artist)"
+                let cachedArt = artCache[artKey]
+                artLines = cachedArt ?? []
+                store.write(snapshot(outcome: .active(np)))
+
                 // When the app owns the queue (a playlist track was picked), the
                 // Up Next window comes from OUR list — Music's `current playlist`
                 // is unreliable after the 26.x regression. Otherwise prefer Music's
@@ -125,7 +147,11 @@ final class PlaybackPoller {
                         lastContext = ctx
                     }
                 }
-                artLines = currentTrackArtLines(width: 44, height: 22)
+                if cachedArt == nil {
+                    artLines = currentTrackArtLines(width: 44, height: 22)
+                    if artCache.count > 64 { artCache.removeAll() }
+                    artCache[artKey] = artLines
+                }
 
                 // Queue-end detection: prev playlist's last track ended naturally
                 // and we flipped to library autoplay.
@@ -145,11 +171,7 @@ final class PlaybackPoller {
                     qEnded = false
                 }
             }
-            store.write(NowPlayingSnapshot(
-                outcome: .active(np), history: history, surrounding: surrounding,
-                contextName: contextName, artLines: artLines,
-                queueEnded: qEnded, endedPlaylist: endedPlaylist,
-                endedTrack: endedTrack, endedArtist: endedArtist, endedArtLines: endedArtLines))
+            store.write(snapshot(outcome: .active(np)))
 
         case .stopped:
             stoppedPolls += 1
@@ -199,11 +221,7 @@ final class PlaybackPoller {
             // brief gap between tracks doesn't flash the stopped state. But once a
             // queue-end is detected, publish immediately so the menu appears.
             if !qEnded && !lastTrack.isEmpty && stoppedPolls < 4 { return }
-            store.write(NowPlayingSnapshot(
-                outcome: .stopped, history: history, surrounding: surrounding,
-                contextName: contextName, artLines: artLines,
-                queueEnded: qEnded, endedPlaylist: endedPlaylist,
-                endedTrack: endedTrack, endedArtist: endedArtist, endedArtLines: endedArtLines))
+            store.write(snapshot(outcome: .stopped))
 
         case .unavailable:
             // Transient read failure: keep the last published snapshot. Never blank

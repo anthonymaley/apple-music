@@ -31,13 +31,16 @@ final class SpeakersScene: Scene {
 
     init(backend: AppleScriptBackend) { self.backend = backend }
 
-    func tick(snapshot: NowPlayingSnapshot) {
+    @discardableResult
+    func tick(snapshot: NowPlayingSnapshot) -> Bool {
         // One-time load (brief stall on first open; off-main is future polish).
         if !loaded {
             loaded = true
             rows = speakerRows(from: (try? fetchSpeakerDevices()) ?? [])
             if cursor >= rows.count { cursor = max(0, rows.count - 1) }
+            return true
         }
+        return false
     }
 
     func render(frame: ShellFrame, snapshot: NowPlayingSnapshot) -> String {

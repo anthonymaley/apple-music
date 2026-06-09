@@ -45,7 +45,8 @@ final class NowPlayingScene: Scene {
     }
     var capturesAllInput: Bool { menuShownLastFrame }
 
-    func tick(snapshot: NowPlayingSnapshot) {
+    @discardableResult
+    func tick(snapshot: NowPlayingSnapshot) -> Bool {
         menuShownLastFrame = menuActive(snapshot)
         pendingFromStopped = snapshot.queueEnded
         if snapshot.queueEnded {
@@ -68,6 +69,9 @@ final class NowPlayingScene: Scene {
             }
         }
         if cursor >= rows.count { cursor = max(0, rows.count - 1) }
+        // Everything above is a pure function of the snapshot; the store's
+        // generation counter already triggers the repaint when it changes.
+        return false
     }
 
     func render(frame: ShellFrame, snapshot: NowPlayingSnapshot) -> String {

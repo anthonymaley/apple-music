@@ -24,13 +24,22 @@ struct NowPlayingSnapshot {
 final class NowPlayingStore {
     private let lock = NSLock()
     private var snapshot = NowPlayingSnapshot(outcome: .unavailable, history: [], surrounding: [])
+    private var generation = 0
 
     func read() -> NowPlayingSnapshot {
         lock.lock(); defer { lock.unlock() }
         return snapshot
     }
 
+    /// Snapshot plus a counter that bumps on every write. The render loop skips
+    /// repainting when the generation hasn't moved (and no key/resize arrived),
+    /// instead of redrawing the whole screen ~10x/s unconditionally.
+    func readWithGeneration() -> (snapshot: NowPlayingSnapshot, generation: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (snapshot, generation)
+    }
+
     func write(_ next: NowPlayingSnapshot) {
-        lock.lock(); snapshot = next; lock.unlock()
+        lock.lock(); snapshot = next; generation += 1; lock.unlock()
     }
 }

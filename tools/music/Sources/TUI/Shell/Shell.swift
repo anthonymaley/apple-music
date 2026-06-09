@@ -51,34 +51,54 @@ func runShell() {
         return (f.width, f.height)
     }
 
+    // Render only when something can have changed: a new poller snapshot (the
+    // store generation moved), scene-local state (tick reports it), a handled
+    // key, or a resize. The loop still spins at the input-poll cadence (~10/s),
+    // but idle iterations skip the full-screen truecolor repaint.
+    var lastGeneration = -1
+    var needsRender = true
+
     while true {
         if terminalResized {
             terminalResized = false
             print(ANSICode.cursorHome + ANSICode.clearScreen, terminator: "")
             fflush(stdout)
+            needsRender = true
         }
 
-        let snap = store.read()
+        let (snap, generation) = store.readWithGeneration()
+        if generation != lastGeneration {
+            lastGeneration = generation
+            needsRender = true
+        }
         let (w, h) = dims()
         let frame = shellLayout(width: w, height: h)
         guard let scene = ensureScene(router.active) ?? scenes[.nowPlaying] else { continue }
-        scene.tick(snapshot: snap)
+        // tick runs every iteration (it drains inboxes and kicks off background
+        // fetches) even when the frame isn't repainted.
+        if scene.tick(snapshot: snap) { needsRender = true }
 
-        var out = renderShellChrome(frame: frame)
-        out += renderTabStrip(active: router.active, tabs: tabs, frame: frame)
-        out += scene.render(frame: frame, snapshot: snap)
-        // No persistent now-playing bar — playback (incl. live progress) lives on
-        // the Now tab. Just the footer hint line at the bottom.
-        // Footer = tab nav + the active scene's own keys + the always-on playback
-        // globals (so shuffle/skip/volume are discoverable from any tab).
-        let globals = "Space \u{23EF}  < > Skip  z Shuffle  +/\u{2212} Vol"
-        out += ANSICode.moveTo(row: frame.footerY, col: 3) + ANSICode.clearLine
-        out += "\(ANSICode.dim)1/2/3 Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
-        print(out, terminator: "")
-        fflush(stdout)
+        if needsRender {
+            needsRender = false
+            var out = renderShellChrome(frame: frame)
+            out += renderTabStrip(active: router.active, tabs: tabs, frame: frame)
+            out += scene.render(frame: frame, snapshot: snap)
+            // No persistent now-playing bar — playback (incl. live progress) lives on
+            // the Now tab. Just the footer hint line at the bottom.
+            // Footer = tab nav + the active scene's own keys + the always-on playback
+            // globals (so shuffle/skip/volume are discoverable from any tab).
+            let globals = "Space \u{23EF}  < > Skip  z Shuffle  +/\u{2212} Vol"
+            out += ANSICode.moveTo(row: frame.footerY, col: 3) + ANSICode.clearLine
+            out += "\(ANSICode.dim)1/2/3 Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
+            // Synchronized output (terminals that don't support it ignore the
+            // escapes): the clear-then-paint inside one frame can't tear.
+            print("\u{1B}[?2026h" + out + "\u{1B}[?2026l", terminator: "")
+            fflush(stdout)
+        }
 
-        // 100ms tick: redraw on timeout so the Now tab's live progress advances.
+        // 100ms input poll; on timeout, loop to pick up poller/inbox changes.
         guard let key = KeyPress.read(timeout: 0.1) else { continue }
+        needsRender = true
 
         // Raw-input scenes (filter/search) get every key, unmediated.
         if !shellShouldResolveGlobals(forSceneCapturing: scene.capturesAllInput) {

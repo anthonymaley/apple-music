@@ -12,11 +12,6 @@ struct NowPlayingState {
     var duration: Int = 0
     var position: Int = 0
     var state: String = "stopped"
-    var speakers: [(name: String, volume: Int)] = []
-    var shuffleEnabled: Bool = false
-    var repeatMode: String = "off"
-    var loved: Bool = false
-    var disliked: Bool = false
 }
 
 struct TrackListEntry {
@@ -37,6 +32,10 @@ enum PollOutcome {
     case unavailable
 }
 
+/// Lean player-state read for the shell's 1s poll: track metadata + position
+/// only. Deliberately no AirPlay enumeration (slow with sleeping HomePods) and
+/// no loved/disliked — nothing in the shell renders them, and this script runs
+/// every second.
 func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> PollOutcome {
     guard let result = try? syncRun({
         try await backend.runMusic("""
@@ -48,23 +47,7 @@ func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> PollO
                 set al to album of current track
                 set d to duration of current track
                 set p to player position
-                set spk to ""
-                set deviceList to every AirPlay device
-                repeat with dev in deviceList
-                    if selected of dev then
-                        if spk is not "" then set spk to spk & ","
-                        set spk to spk & name of dev & ":" & sound volume of dev
-                    end if
-                end repeat
-                set sh to shuffle enabled
-                set rp to song repeat as text
-                set lv to false
-                set dl to false
-                try
-                    set lv to loved of current track
-                    set dl to disliked of current track
-                end try
-                return t & "|" & a & "|" & al & "|" & (round d) & "|" & (round p) & "|" & state & "|" & spk & "|" & sh & "|" & rp & "|" & lv & "|" & dl
+                return t & "|" & a & "|" & al & "|" & (round d) & "|" & (round p) & "|" & state
             end try
             return "STOPPED"
         """)
@@ -72,26 +55,13 @@ func pollNowPlaying(backend: AppleScriptBackend = AppleScriptBackend()) -> PollO
 
     let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed == "STOPPED" { return .stopped }
-    let parts = trimmed.split(separator: "|", maxSplits: 10).map(String.init)
-    guard parts.count >= 7 else { return .unavailable }
-
-    let speakers = parts[6].split(separator: ",").compactMap { pair -> (name: String, volume: Int)? in
-        let kv = pair.split(separator: ":", maxSplits: 1)
-        guard let first = kv.first else { return nil }
-        return (name: String(first), volume: Int(kv.count > 1 ? String(kv[1]) : "0") ?? 0)
-    }
-
-    let shuffleEnabled = parts.count > 7 && parts[7].trimmingCharacters(in: .whitespaces) == "true"
-    let repeatMode = parts.count > 8 ? parts[8].trimmingCharacters(in: .whitespaces) : "off"
-    let loved = parts.count > 9 && parts[9].trimmingCharacters(in: .whitespaces) == "true"
-    let disliked = parts.count > 10 && parts[10].trimmingCharacters(in: .whitespaces) == "true"
+    let parts = trimmed.split(separator: "|", maxSplits: 5).map(String.init)
+    guard parts.count >= 6 else { return .unavailable }
 
     return .active(NowPlayingState(
         track: parts[0], artist: parts[1], album: parts[2],
         duration: Int(parts[3]) ?? 0, position: Int(parts[4]) ?? 0,
-        state: parts[5], speakers: speakers,
-        shuffleEnabled: shuffleEnabled, repeatMode: repeatMode,
-        loved: loved, disliked: disliked
+        state: parts[5]
     ))
 }
 
@@ -251,7 +221,6 @@ func artworkToAscii(path: String, width: Int = 20, height: Int = 10) -> [String]
             "--size", "\(width)x\(height)",
             "--symbols", "block+border+space",
             "--color-space", "rgb",
-            "--work", "9",
             path
         ]
         let pipe = Pipe()

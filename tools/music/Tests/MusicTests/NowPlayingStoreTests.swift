@@ -20,6 +20,27 @@ final class NowPlayingStoreTests: XCTestCase {
         if case .unavailable = store.read().outcome { } else { XCTFail("expected unavailable default") }
     }
 
+    func testGenerationBumpsOnEveryWriteAndIsStableAcrossReads() {
+        let store = NowPlayingStore()
+        let g0 = store.readWithGeneration().generation
+        XCTAssertEqual(store.readWithGeneration().generation, g0, "reads must not advance the generation")
+        store.write(NowPlayingSnapshot(outcome: .stopped, history: [], surrounding: []))
+        let g1 = store.readWithGeneration().generation
+        XCTAssertNotEqual(g1, g0)
+        store.write(NowPlayingSnapshot(outcome: .stopped, history: [], surrounding: []))
+        XCTAssertNotEqual(store.readWithGeneration().generation, g1, "identical payloads still bump (a write is a change signal)")
+    }
+
+    func testReadWithGenerationReturnsLastWrite() {
+        let store = NowPlayingStore()
+        var np = NowPlayingState()
+        np.track = "Telegram"
+        store.write(NowPlayingSnapshot(outcome: .active(np), history: [], surrounding: []))
+        let (snap, _) = store.readWithGeneration()
+        guard case .active(let got) = snap.outcome else { return XCTFail("expected active") }
+        XCTAssertEqual(got.track, "Telegram")
+    }
+
     func testConcurrentWritesDoNotTearState() {
         let store = NowPlayingStore()
         let group = DispatchGroup()

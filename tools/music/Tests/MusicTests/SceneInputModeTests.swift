@@ -6,7 +6,7 @@ private final class StubScene: Scene {
     let tabTitle = "Stub"
     var capturing = false
     var capturesAllInput: Bool { capturing }
-    func tick(snapshot: NowPlayingSnapshot) {}
+    func tick(snapshot: NowPlayingSnapshot) -> Bool { false }
     func render(frame: ShellFrame, snapshot: NowPlayingSnapshot) -> String { "" }
     func handle(_ key: KeyPress) -> SceneAction { .none }
 }

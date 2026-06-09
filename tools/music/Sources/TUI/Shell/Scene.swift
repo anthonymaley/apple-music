@@ -21,9 +21,14 @@ protocol Scene: AnyObject {
     /// resolving globals, Tab, or Esc — for raw text entry (filter, search).
     var capturesAllInput: Bool { get }
 
-    /// Called once per frame before render, so the scene can fold the latest
-    /// snapshot into its own view state (e.g. clamp a cursor to new row counts).
-    func tick(snapshot: NowPlayingSnapshot)
+    /// Called once per loop iteration before render, so the scene can fold the
+    /// latest snapshot into its own view state (e.g. clamp a cursor to new row
+    /// counts) and drain any background-fetch inboxes. Returns true when the
+    /// scene's own state changed in a way the snapshot generation can't see
+    /// (drained inbox, async load landed), so the shell repaints. Runs every
+    /// iteration regardless of whether the last frame was painted.
+    @discardableResult
+    func tick(snapshot: NowPlayingSnapshot) -> Bool
 
     /// Return the ANSI string for the body region only.
     func render(frame: ShellFrame, snapshot: NowPlayingSnapshot) -> String

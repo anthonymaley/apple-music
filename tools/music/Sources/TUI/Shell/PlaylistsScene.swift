@@ -36,6 +36,15 @@ final class PlaylistsScene: Scene {
     private let inboxLock = NSLock()
     private var inbox: [Int: (Int, Int, Bool, String)] = [:]
 
+    // Preview fetches follow the same inbox pattern (an inline fetch in tick()
+    // froze input for one osascript round-trip per uncached rail row). A serial
+    // queue both keeps `onPreview`'s internal cache single-threaded and avoids
+    // piling concurrent AppleScript load onto Music while scrolling.
+    private let previewQueue = DispatchQueue(label: "music.playlists.preview")
+    private let previewInboxLock = NSLock()
+    private var previewInbox: [Int: [String]] = [:]
+    private var previewInFlight: Set<Int> = []   // tick()-thread only
+
     private let metaCol = 6
 
     init(backend: AppleScriptBackend, playlists: [String], sources: PlaylistDataSources, appQueue: AppQueueStore) {
@@ -129,7 +138,9 @@ final class PlaylistsScene: Scene {
 
     // MARK: Scene
 
-    func tick(snapshot: NowPlayingSnapshot) {
+    @discardableResult
+    func tick(snapshot: NowPlayingSnapshot) -> Bool {
+        var changed = false
         // Apply metadata the background refresh thread has fetched (off-main), so
         // the slow AppleScript never blocks a render frame.
         let fresh = drainMeta()
@@ -140,12 +151,33 @@ final class PlaylistsScene: Scene {
             meta[idx].specialKind = v.3
             meta[idx].loaded = true
             loaded.insert(idx)
+            changed = true
         }
-        // One preview fetch per frame when the preview pane is shown and empty.
+        // Landed preview fetches.
+        previewInboxLock.lock()
+        let freshPreviews = previewInbox; previewInbox = [:]
+        previewInboxLock.unlock()
+        for (idx, lines) in freshPreviews {
+            previewLines[idx] = lines
+            previewInFlight.remove(idx)
+            changed = true
+        }
+        // Kick off a preview fetch (off-thread) when the pane is shown and empty.
         let z = playlistZones(width: ScreenFrame.current().width)
-        if focus == .playlists, z.mode == .three, previewLines[plCursor] == nil {
-            previewLines[plCursor] = sources.onPreview(plCursor) ?? []
+        if focus == .playlists, z.mode == .three,
+           previewLines[plCursor] == nil, !previewInFlight.contains(plCursor) {
+            previewInFlight.insert(plCursor)
+            let idx = plCursor
+            let sources = self.sources
+            previewQueue.async { [weak self] in
+                let lines = sources.onPreview(idx) ?? []
+                guard let self else { return }
+                self.previewInboxLock.lock()
+                self.previewInbox[idx] = lines
+                self.previewInboxLock.unlock()
+            }
         }
+        return changed
     }
 
     func render(frame: ShellFrame, snapshot: NowPlayingSnapshot) -> String {
