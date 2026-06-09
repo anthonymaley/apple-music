@@ -5,6 +5,12 @@ final class PlaylistsScene: Scene {
     let id: SceneID = .playlists
     let tabTitle = "Playlists"
     var capturesAllInput: Bool { filtering }
+    var footerHint: String {
+        if filtering { return "type to filter  Enter Apply  Esc Clear" }
+        return focus == .tracks
+            ? "\u{2191}\u{2193} Track  Enter Play  \u{2190} Back"
+            : "\u{2191}\u{2193} Move  Enter Open  p Play  s Shuffle  / Filter"
+    }
 
     private let backend: AppleScriptBackend
     private let playlists: [String]

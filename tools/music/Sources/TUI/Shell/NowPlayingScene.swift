@@ -15,6 +15,7 @@ func continuationAction(for key: KeyPress) -> ContinuationAction? {
 final class NowPlayingScene: Scene {
     let id: SceneID = .nowPlaying
     let tabTitle = "Now"
+    var footerHint: String { "\u{2191}\u{2193} Browse  Enter Jump  \u{2190}\u{2192} Seek  n Next\u{2011}up" }
 
     private let backend: AppleScriptBackend
     private let appQueue: AppQueueStore
@@ -120,7 +121,7 @@ final class NowPlayingScene: Scene {
         out += ANSICode.moveTo(row: my, col: leftX) + "\(elapsed) \(bar) \(total)"
         my += 2
         if !snapshot.contextName.isEmpty {
-            out += ANSICode.moveTo(row: my, col: leftX) + "\(ANSICode.dim)from \(truncText(cleanContextName(snapshot.contextName), to: metaW - 5))\(ANSICode.reset)"
+            out += ANSICode.moveTo(row: my, col: leftX) + "\(ANSICode.cyan)\u{266A} \(ANSICode.reset)\(ANSICode.brightWhite)\(truncText(cleanContextName(snapshot.contextName), to: metaW - 3))\(ANSICode.reset)"
         }
 
         // --- Up Next: right pane (wide) or below the metadata (narrow) ---

@@ -30,10 +30,15 @@ protocol Scene: AnyObject {
 
     /// Handle a scene-local key (globals were already resolved by the shell).
     func handle(_ key: KeyPress) -> SceneAction
+
+    /// Short scene-specific key hints for the shell footer (the shell appends the
+    /// global playback keys). Empty by default.
+    var footerHint: String { get }
 }
 
 extension Scene {
     var capturesAllInput: Bool { false }
+    var footerHint: String { "" }
 }
 
 /// Pure decision: should the shell resolve global/navigation keys for the

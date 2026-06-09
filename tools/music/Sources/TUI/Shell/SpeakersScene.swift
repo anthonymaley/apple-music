@@ -22,6 +22,7 @@ func speakerRows(from devices: [[String: Any]]) -> [SpeakerRow] {
 final class SpeakersScene: Scene {
     let id: SceneID = .speakers
     let tabTitle = "Speakers"
+    var footerHint: String { "\u{2191}\u{2193} Speaker  Enter Toggle  \u{2190}\u{2192} Volume" }
 
     private let backend: AppleScriptBackend
     private var rows: [SpeakerRow] = []

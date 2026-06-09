@@ -69,8 +69,11 @@ func runShell() {
         out += scene.render(frame: frame, snapshot: snap)
         // No persistent now-playing bar — playback (incl. live progress) lives on
         // the Now tab. Just the footer hint line at the bottom.
+        // Footer = tab nav + the active scene's own keys + the always-on playback
+        // globals (so shuffle/skip/volume are discoverable from any tab).
+        let globals = "Space \u{23EF}  < > Skip  z Shuffle  +/\u{2212} Vol"
         out += ANSICode.moveTo(row: frame.footerY, col: 3) + ANSICode.clearLine
-        out += "\(ANSICode.dim)1 Now  2 Playlists  3 Speakers  Tab Switch   \u{2191}\u{2193} Move  Enter Select  q Quit\(ANSICode.reset)"
+        out += "\(ANSICode.dim)1/2/3 Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
         print(out, terminator: "")
         fflush(stdout)
 
