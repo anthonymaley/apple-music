@@ -93,6 +93,7 @@ apple-music/
 Published via Claude Code marketplace. Version bumps must update all four locations (see CLAUDE.md) and rebuild via `scripts/install.sh`. Tag releases (`git tag vX.Y.Z`) and publish a GitHub release (`gh release create`) — releases had silently stopped at v1.6.1 while ten versions shipped untagged.
 
 ## Gotchas
+- **Apple-curated playlists are class `subscription playlist`, not `user playlist`** — `every user playlist` silently omits them (verified live: 49 user + 9 subscription + 1 library = 59). Resolve by bare name (`playlist "Loops"`) and they work like any playlist for reads/playback; they're read-only for writes. Their `smart` property errors with -1700 on coercion — always try-wrap it.
 - **`gh release create --notes` via a quoted heredoc (`<<'EOF'`) keeps backslash escapes literal** — `\\`` shows up verbatim in the published body. Backticks need no escaping inside a quoted heredoc. Read the body back (`gh release view --json body`) before calling it done.
 - **Parameter error (-50)** — Split AirPlay routing and playback into separate osascript calls
 - **MusicKit JS requires HTTP origin** — Auth page served via localhost:8537, not file://

@@ -312,7 +312,7 @@ Two markers in the track pane: green `▶` = currently playing, inverse video = 
 
 ![Now Playing](media/nowplaying.png)
 
-**Playlists tab** — left: playlists (instant highlight on `↑↓`, no fetch; `/` filters as you type, arrows still navigate). Right: tracks (loaded on `Enter`, which also pins the playlist on the Now tab). `p` plays playlist, `s` shuffles, `b`/`Esc` goes back.
+**Playlists tab** — left: playlists (instant highlight on `↑↓`, no fetch; `/` filters as you type, arrows still navigate). Right: tracks (loaded on `Enter`, which also pins the playlist on the Now tab). `p` plays playlist, `s` shuffles, `b`/`Esc` goes back. Apple-curated playlists you've added to your library (Replay, Essentials, etc.) appear with an `APPLE` badge — no need to duplicate them, so they keep receiving Apple's weekly/monthly updates.
 
 ![Playlist Browser](media/playlist.jpg)
 

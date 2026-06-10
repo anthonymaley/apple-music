@@ -19,6 +19,31 @@ final class PlaylistBrowserModelTests: XCTestCase {
     func testRadioWinsOverSmart() {
         XCTAssertEqual(playlistBadge(name: "__radio__BORN FREE", isSmart: true, specialKind: "none"), .radio)
     }
+    func testAppleBadgeForSubscriptionPlaylist() {
+        XCTAssertEqual(playlistBadge(name: "Loops", isSmart: false, specialKind: "none", isSubscription: true), .apple)
+    }
+    func testAppleWinsOverSmart() {
+        // `smart` errors on subscription playlists and defaults false, but if a
+        // future read ever reports true, the Apple identity is the useful badge.
+        XCTAssertEqual(playlistBadge(name: "Replay 2022", isSmart: true, specialKind: "none", isSubscription: true), .apple)
+    }
+    func testRecentWinsOverApple() {
+        XCTAssertEqual(playlistBadge(name: "Recently Played", isSmart: false, specialKind: "none", isSubscription: true), .recent)
+    }
+
+    // subscription-aware rail fetch parsing
+    func testParseRailNamesSplitsUserAndSubscription() {
+        let raw = "U\u{1F}Working Vibes\nS\u{1F}Loops\nU\u{1F}__queue__ leftover\nS\u{1F}Replay 2022\n"
+        let parsed = parseRailPlaylistNames(raw)
+        XCTAssertEqual(parsed.names, ["Working Vibes", "Loops", "Replay 2022"])
+        XCTAssertEqual(parsed.subscription, ["Loops", "Replay 2022"])
+    }
+    func testParseRailNamesTolerantOfMalformedLines() {
+        let raw = "garbage-no-sep\nU\u{1F}Real One\n\n"
+        let parsed = parseRailPlaylistNames(raw)
+        XCTAssertEqual(parsed.names, ["Real One"])
+        XCTAssertTrue(parsed.subscription.isEmpty)
+    }
 
     // duration formatting
     func testFormatDurationHoursAndMinutes() {

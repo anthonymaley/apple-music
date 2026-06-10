@@ -117,6 +117,7 @@ music                           Unified shell: Now / Playlists / Speakers tabs
 Current TUI contract:
 
 - The Playlists tab does not fetch tracks on every playlist highlight; it loads tracks on selection. `/` filters the playlist rail as you type (arrows still navigate while filtering).
+- Apple-curated playlists added to the library (AppleScript class `subscription playlist`) appear in the rail with an `APPLE` badge. They're read-only on Apple's side — edits fail with a toast, by design.
 - Selecting a playlist pins it on the Now tab, which shows the full playlist and keeps `↑↓` navigation local.
 - The Now tab shows the current album context, not a real Apple Music queue.
 - `Enter` plays the highlighted row.

@@ -88,24 +88,45 @@ func sweepQueuePlaylists(backend: AppleScriptBackend) {
     }
 }
 
-func fetchUserPlaylistNames(backend: AppleScriptBackend) -> [String] {
+/// Parse the rail-names script output: one `U<US>name` (user playlist) or
+/// `S<US>name` (subscription playlist) line per playlist. Pure, tested.
+/// Filters obsolete `__queue__` temp playlists so they don't clutter the rail.
+func parseRailPlaylistNames(_ raw: String) -> (names: [String], subscription: Set<String>) {
+    var names: [String] = []
+    var subscription: Set<String> = []
+    for line in raw.components(separatedBy: "\n") {
+        let parts = line.split(separator: asFieldSep, maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { continue }
+        let name = parts[1].trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, !name.hasPrefix("__queue__ ") else { continue }
+        names.append(name)
+        if parts[0].trimmingCharacters(in: .whitespaces) == "S" { subscription.insert(name) }
+    }
+    return (names, subscription)
+}
+
+/// Apple-curated playlists added to the library are class `subscription
+/// playlist`, NOT `user playlist` — `every user playlist` silently omits them
+/// (they only ever appeared in the rail via manual duplicates). Enumerate both
+/// classes in one call; downstream code resolves `playlist "name"` generically,
+/// which covers both.
+func fetchUserPlaylistNames(backend: AppleScriptBackend) -> (names: [String], subscription: Set<String>) {
     guard let result = try? syncRun({
         try await backend.runMusic("""
+            set fs to (ASCII character 31)
             set output to ""
             repeat with p in (every user playlist)
                 if output is not "" then set output to output & linefeed
-                set output to output & name of p
+                set output to output & "U" & fs & name of p
+            end repeat
+            repeat with p in (every subscription playlist)
+                if output is not "" then set output to output & linefeed
+                set output to output & "S" & fs & name of p
             end repeat
             return output
         """)
-    }) else { return [] }
-    return result.trimmingCharacters(in: .whitespacesAndNewlines)
-        .components(separatedBy: "\n")
-        .map { $0.trimmingCharacters(in: .whitespaces) }
-        .filter { !$0.isEmpty }
-        // Obsolete temp playlists left by the old play-track workaround; the seek
-        // approach no longer creates them. Hide so they don't clutter the rail.
-        .filter { !$0.hasPrefix("__queue__ ") }
+    }) else { return ([], []) }
+    return parseRailPlaylistNames(result)
 }
 
 /// Build the three data-source closures over a fixed `names` list. Each closure

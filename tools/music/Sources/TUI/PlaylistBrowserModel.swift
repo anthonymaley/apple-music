@@ -15,15 +15,19 @@ struct PlaylistMeta {
 }
 
 enum PlaylistBadge: Equatable {
-    case radio, smart, recent, none
+    case radio, smart, recent, apple, none
 }
 
 private let recentPlaylistNames: Set<String> = ["Recently Played", "Top 25 Most Played"]
 
-/// Pure badge derivation. radio > recent > smart > none.
-func playlistBadge(name: String, isSmart: Bool, specialKind: String) -> PlaylistBadge {
+/// Pure badge derivation. radio > recent > apple > smart > none.
+/// `isSubscription` marks Apple-curated playlists added to the library
+/// (AppleScript class `subscription playlist`) — they update on Apple's
+/// schedule and are read-only.
+func playlistBadge(name: String, isSmart: Bool, specialKind: String, isSubscription: Bool = false) -> PlaylistBadge {
     if name.hasPrefix("__radio__") { return .radio }
     if recentPlaylistNames.contains(name) { return .recent }
+    if isSubscription { return .apple }
     if isSmart { return .smart }
     return .none
 }

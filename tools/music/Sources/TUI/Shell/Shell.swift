@@ -21,10 +21,12 @@ func runShell() {
         if let s = scenes[id] { return s }
         switch id {
         case .playlists:
-            let names = fetchUserPlaylistNames(backend: backend)
+            let fetched = fetchUserPlaylistNames(backend: backend)
+            let names = fetched.names
             guard !names.isEmpty else { return nil }
             let scene = PlaylistsScene(backend: backend,
                                        playlists: names,
+                                       subscriptionNames: fetched.subscription,
                                        sources: makePlaylistDataSources(backend: backend, names: names),
                                        appQueue: appQueue,
                                        status: status,

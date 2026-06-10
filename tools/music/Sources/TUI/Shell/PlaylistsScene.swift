@@ -14,6 +14,7 @@ final class PlaylistsScene: Scene {
 
     private let backend: AppleScriptBackend
     private let playlists: [String]
+    private let subscriptionNames: Set<String>
     private let sources: PlaylistDataSources
     private let appQueue: AppQueueStore
     private let status: StatusStore
@@ -52,10 +53,12 @@ final class PlaylistsScene: Scene {
 
     private let metaCol = 6
 
-    init(backend: AppleScriptBackend, playlists: [String], sources: PlaylistDataSources,
+    init(backend: AppleScriptBackend, playlists: [String], subscriptionNames: Set<String> = [],
+         sources: PlaylistDataSources,
          appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
         self.backend = backend
         self.playlists = playlists
+        self.subscriptionNames = subscriptionNames
         self.sources = sources
         self.appQueue = appQueue
         self.status = status
@@ -159,10 +162,12 @@ final class PlaylistsScene: Scene {
         }
     }
     private func badgeText(_ m: PlaylistMeta) -> (String, String)? {
-        switch playlistBadge(name: m.name, isSmart: m.isSmart ?? false, specialKind: m.specialKind ?? "none") {
+        switch playlistBadge(name: m.name, isSmart: m.isSmart ?? false, specialKind: m.specialKind ?? "none",
+                             isSubscription: subscriptionNames.contains(m.name)) {
         case .radio: return ("RADIO", ANSICode.amber)
         case .smart: return ("SMART", ANSICode.amber)
         case .recent: return ("RECENT", ANSICode.amber)
+        case .apple: return ("APPLE", ANSICode.amber)
         case .none: return nil
         }
     }
