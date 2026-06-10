@@ -41,6 +41,19 @@ struct Remove: ParsableCommand {
             return check?.trimmingCharacters(in: .whitespacesAndNewlines) == "DELETED"
         }
 
+        // One output path so --json is honored everywhere (the flag used to be
+        // declared and never read).
+        func report(removedFrom: [String]) {
+            if json {
+                let output = OutputFormat(mode: .json)
+                print(output.render(["removed": !removedFrom.isEmpty, "track": title, "artist": artist, "playlists": removedFrom]))
+            } else if removedFrom.isEmpty {
+                print("'\(title)' not found.")
+            } else {
+                print("Removed '\(title)' from: \(removedFrom.joined(separator: ", "))")
+            }
+        }
+
         if target.isEmpty {
             let playlistResult = try syncRun {
                 try await backend.runMusic("""
@@ -53,14 +66,10 @@ struct Remove: ParsableCommand {
             }
             let playlistName = playlistResult.trimmingCharacters(in: .whitespacesAndNewlines)
             if playlistName == "NO_PLAYLIST" {
-                print("Not playing from a playlist.")
+                print(json ? "{\"removed\":false,\"error\":\"not playing from a playlist\"}" : "Not playing from a playlist.")
                 throw ExitCode.failure
             }
-            if try deleteTrack(from: playlistName) {
-                print("Removed '\(title)' from '\(playlistName)'.")
-            } else {
-                print("'\(title)' not found in '\(playlistName)'.")
-            }
+            report(removedFrom: try deleteTrack(from: playlistName) ? [playlistName] : [])
 
         } else if target.count == 1 && target[0].lowercased() == "all" {
             let allPlaylists = try syncRun {
@@ -75,19 +84,11 @@ struct Remove: ParsableCommand {
                     removedFrom.append(pl)
                 }
             }
-            if removedFrom.isEmpty {
-                print("'\(title)' not found in any playlist.")
-            } else {
-                print("Removed '\(title)' from: \(removedFrom.joined(separator: ", "))")
-            }
+            report(removedFrom: removedFrom)
 
         } else {
             let playlistName = target.joined(separator: " ")
-            if try deleteTrack(from: playlistName) {
-                print("Removed '\(title)' from '\(playlistName)'.")
-            } else {
-                print("'\(title)' not found in '\(playlistName)'.")
-            }
+            report(removedFrom: try deleteTrack(from: playlistName) ? [playlistName] : [])
         }
     }
 }

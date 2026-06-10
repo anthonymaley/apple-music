@@ -3,8 +3,10 @@ import Foundation
 
 struct Similar: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Find similar tracks.")
-    @Argument(help: "Title (omit for current track)") var title: String?
-    @Argument(help: "Artist") var artist: String?
+    // Variadic, like Search/Play: `music similar Hotel California` is one title.
+    // (Two separate positionals parsed that as title="Hotel" artist="California".)
+    @Argument(help: "Title (omit for current track)") var query: [String] = []
+    @Option(name: .long, help: "Artist to narrow the match") var artist: String?
     @Option(name: .long, help: "Max results") var limit: Int = 10
     @Flag(name: .long, help: "Output JSON") var json = false
 
@@ -15,7 +17,8 @@ struct Similar: ParsableCommand {
         let api = RESTAPIBackend(developerToken: devToken, userToken: userToken, storefront: auth.storefront())
 
         var searchQuery: String
-        if let title = title {
+        if !query.isEmpty {
+            let title = query.joined(separator: " ")
             searchQuery = artist != nil ? "\(title) \(artist!)" : title
         } else {
             let backend = AppleScriptBackend()

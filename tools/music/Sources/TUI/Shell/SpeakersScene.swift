@@ -74,6 +74,13 @@ final class SpeakersScene: Scene {
         let now = Date()
         let reentered = now.timeIntervalSince(lastTickAt) > 0.5
         lastTickAt = now
+        // A wedged enumeration (osascript hung on a dying device) used to set
+        // fetchInFlight forever and kill refreshes for the session; treat a
+        // long-overdue fetch as dead and allow a new kickoff. (The backend
+        // watchdog also terminates the hung osascript itself.)
+        if fetchInFlight, now.timeIntervalSince(fetchStartedAt) > 30 {
+            fetchInFlight = false
+        }
         if !fetchInFlight, reentered || now.timeIntervalSince(lastFetchKickoff) > 5 {
             fetchInFlight = true
             fetchStartedAt = now

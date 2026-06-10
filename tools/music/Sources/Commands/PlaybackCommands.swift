@@ -11,12 +11,10 @@ struct Play: ParsableCommand {
     @Option(name: .long, help: "Artist name") var artist: String?
     @Flag(name: .long, help: "Output JSON") var json = false
     @Flag(name: [.customShort("v"), .customLong("verbose")], help: "Show diagnostic output") var verboseFlag = false
-    @Flag(name: .long, help: "Skip speaker wake cycle") var noWake = false
 
     func run() throws {
         Music.verbose = verboseFlag
         Music.isJSON = json
-        Music.noWake = noWake
         let backend = AppleScriptBackend()
 
         // Existing flag-based behavior takes priority
@@ -397,8 +395,14 @@ func showNowPlaying(json: Bool = false, waitForPlay: Bool = false) {
                         return "STOPPED"
                     end if
     """
+    // Device enumeration happens ONCE after the track info succeeds — it used
+    // to run inside every iteration of the retry loop, multiplying the
+    // known-slow AirPlay probe by up to 10 after every playback command. The
+    // bulk `whose selected is true` reads are 2 Apple Events instead of 3 per
+    // device (the per-list repeat below is local, no Apple Events).
     guard let result = try? syncRun({
         try await backend.runMusic("""
+            set info to ""
             repeat 10 times
                 try
                     set state to player state as text
@@ -408,19 +412,22 @@ func showNowPlaying(json: Bool = false, waitForPlay: Bool = false) {
                     set al to album of current track
                     set d to duration of current track
                     set p to player position
-                    set spk to ""
-                    set deviceList to every AirPlay device
-                    repeat with dev in deviceList
-                        if selected of dev then
-                            if spk is not "" then set spk to spk & ","
-                            set spk to spk & name of dev & ":" & sound volume of dev
-                        end if
-                    end repeat
-                    return t & "|" & a & "|" & al & "|" & (round d) & "|" & (round p) & "|" & state & "|" & spk
+                    set info to t & "|" & a & "|" & al & "|" & (round d) & "|" & (round p) & "|" & state
+                    exit repeat
                 end try
                 delay 0.3
             end repeat
-            return "LOADING"
+            if info is "" then return "LOADING"
+            set spk to ""
+            try
+                set selNames to name of (every AirPlay device whose selected is true)
+                set selVols to sound volume of (every AirPlay device whose selected is true)
+                repeat with i from 1 to (count of selNames)
+                    if spk is not "" then set spk to spk & ","
+                    set spk to spk & (item i of selNames) & ":" & (item i of selVols)
+                end repeat
+            end try
+            return info & "|" & spk
         """)
     }) else { return }
 
@@ -453,13 +460,33 @@ func showNowPlaying(json: Bool = false, waitForPlay: Bool = false) {
 }
 
 struct Shuffle: ParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Toggle shuffle.")
-    @Argument(help: "on or off") var state: String
+    static let configuration = CommandConfiguration(abstract: "Toggle shuffle (or set on/off).")
+    @Argument(help: "on or off (omit to toggle)") var state: String?
+    @Flag(name: .long, help: "Output JSON") var json = false
     func run() throws {
         let backend = AppleScriptBackend()
-        let val = state.lowercased() == "on" ? "true" : "false"
-        _ = try syncRun { try await backend.runMusic("set shuffle enabled to \(val)") }
-        print("Shuffle \(state.lowercased()).")
+        let newState: String
+        if let state = state {
+            let s = state.lowercased()
+            // `music shuffle banana` used to print "Shuffle banana." and set it OFF.
+            guard s == "on" || s == "off" else { throw ValidationError("Shuffle must be on or off (or omitted to toggle).") }
+            _ = try syncRun { try await backend.runMusic("set shuffle enabled to \(s == "on")") }
+            newState = s
+        } else {
+            let result = try syncRun {
+                try await backend.runMusic("""
+                    if shuffle enabled then
+                        set shuffle enabled to false
+                        return "off"
+                    else
+                        set shuffle enabled to true
+                        return "on"
+                    end if
+                """)
+            }
+            newState = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        print(json ? "{\"shuffle\":\"\(newState)\"}" : "Shuffle \(newState).")
     }
 }
 

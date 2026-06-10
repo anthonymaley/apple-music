@@ -131,7 +131,7 @@ music mix --artists "Fouk,Floating Points" --count 20 --name "Friday Mix"  # mix
 music                                         # unified shell: Now / Playlists / Speakers tabs
 ```
 
-Bare `music` is the only interactive surface — a tabbed shell with **Now**, **Playlists**, and **Speakers** tabs. (`music now` / `music now --json` and `music playlist <subcommand>` are non-interactive CLI commands, documented above.)
+Bare `music` is the main interactive surface — a tabbed shell with **Now**, **Playlists**, and **Speakers** tabs. (`music now` / `music now --json` and `music playlist <subcommand>` are non-interactive CLI commands, documented above.) Four one-shot quick pickers also exist for terminal/slash-command use: bare `music speaker` (AirPlay picker), bare `music volume` (mixer), and the `music similar` / `music suggest` result pickers.
 
 TUI behavior: the Now tab shows the current album context; selecting a playlist on the Playlists tab pins it on the Now tab. Cursor movement is local and fast.
 

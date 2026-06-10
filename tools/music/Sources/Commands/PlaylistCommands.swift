@@ -181,6 +181,7 @@ struct PlaylistCreate: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "create", abstract: "Create a playlist.")
     @Argument(help: "Playlist name") var name: String
     @Argument(help: "Result indices to add (from last search/similar)") var indices: [Int] = []
+    @Flag(name: .long, help: "Output JSON") var json = false
     func run() throws {
         let auth = AuthManager()
         let devToken = try auth.requireDeveloperToken()
@@ -198,6 +199,11 @@ struct PlaylistCreate: ParsableCommand {
         }
         _ = try syncRun { try await api.createPlaylist(name: name, songIDs: songs.map(\.catalogId)) }
 
+        if json {
+            let output = OutputFormat(mode: .json)
+            print(output.render(["created": name, "tracks": songs.map { ["title": $0.title, "artist": $0.artist] }]))
+            return
+        }
         for song in songs { print("  + \(song.title) — \(song.artist)") }
         if songs.isEmpty {
             print("Created playlist '\(name)'.")
@@ -210,13 +216,25 @@ struct PlaylistCreate: ParsableCommand {
 struct PlaylistDelete: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "delete", abstract: "Delete a playlist.")
     @Argument(help: "Playlist name") var name: String
+    @Flag(name: .long, help: "Skip confirmation") var force = false
+    @Flag(name: .long, help: "Output JSON") var json = false
     func run() throws {
+        // Deletion is irreversible and one typo away — confirm when a human is
+        // at the keyboard. Scripts (no TTY) and --force skip the prompt.
+        if !force && isatty(STDIN_FILENO) != 0 {
+            print("Delete playlist '\(name)'? [y/N] ", terminator: "")
+            let answer = readLine() ?? ""
+            guard answer.lowercased().hasPrefix("y") else {
+                print("Cancelled.")
+                return
+            }
+        }
         let backend = AppleScriptBackend()
         let escName = escapeAppleScriptString(name)
         _ = try syncRun {
             try await backend.runMusic("delete playlist \"\(escName)\"")
         }
-        print("Deleted playlist '\(name)'.")
+        print(json ? "{\"deleted\":\"\(name)\"}" : "Deleted playlist '\(name)'.")
     }
 }
 
@@ -224,6 +242,7 @@ struct PlaylistAdd: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "add", abstract: "Add track(s) to playlist.")
     @Argument(help: "Playlist name") var playlist: String
     @Argument(help: "Song title or result indices") var items: [String] = []
+    @Flag(name: .long, help: "Output JSON") var json = false
     func run() throws {
         let auth = AuthManager()
         let devToken = try auth.requireDeveloperToken()
@@ -243,6 +262,11 @@ struct PlaylistAdd: ParsableCommand {
             guard !songs.isEmpty else { return }
             try addSongs(songs.map { CatalogSong(id: $0.catalogId, title: $0.title, artist: $0.artist, album: $0.album) },
                          to: playlist, api: api, backend: backend)
+            if json {
+                let output = OutputFormat(mode: .json)
+                print(output.render(["added": songs.count, "playlist": playlist]))
+                return
+            }
             for song in songs { print("  + \(song.title) — \(song.artist)") }
             print("Added \(songs.count) track(s) to '\(playlist)'.")
             return
@@ -259,9 +283,14 @@ struct PlaylistAdd: ParsableCommand {
             print("No results for '\(searchQuery)'")
             throw ExitCode.failure
         }
-        print("Found: \(song.title) — \(song.artist)")
+        if !json { print("Found: \(song.title) — \(song.artist)") }
         try addSongs([song], to: playlist, api: api, backend: backend)
-        print("Added to '\(playlist)'.")
+        if json {
+            let output = OutputFormat(mode: .json)
+            print(output.render(["added": 1, "playlist": playlist, "track": song.title, "artist": song.artist]))
+        } else {
+            print("Added to '\(playlist)'.")
+        }
     }
 }
 

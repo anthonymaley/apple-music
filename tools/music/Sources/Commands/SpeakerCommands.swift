@@ -104,16 +104,23 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
 
     case .exclusive(let name):
         let resolved = try resolveSpeakerName(name, backend: backend)
-        _ = try syncRun {
-            try await backend.runMusic("""
-                set allDevices to every AirPlay device
-                repeat with d in allDevices
-                    set selected of d to false
-                end repeat
-            """)
-        }
+        // Select the target FIRST: the old deselect-all-then-select could end
+        // with NO outputs at all if the target failed after the teardown. Also
+        // per-device try — one unreachable device must not abort the rest (an
+        // AppleScript repeat dies on the first error otherwise).
         _ = try syncRun {
             try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(resolved))\" to true")
+        }
+        _ = try syncRun {
+            try await backend.runMusic("""
+                repeat with d in (every AirPlay device)
+                    try
+                        if name of d is not "\(escapeAppleScriptString(resolved))" and selected of d then
+                            set selected of d to false
+                        end if
+                    end try
+                end repeat
+            """)
         }
         print("Switched to \(resolved) only.")
 
@@ -131,8 +138,14 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
         if let name = name {
             // Wake a specific speaker: select it, then reset to establish a clean connection
             let resolved = try resolveSpeakerName(name, backend: backend)
-            _ = try syncRun {
-                try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(resolved))\" to true")
+            do {
+                _ = try syncRun {
+                    try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(resolved))\" to true")
+                }
+            } catch {
+                // A sleeping device erroring on first select is the very case
+                // wake exists for — say so instead of dumping AppleScript noise.
+                throw AppleScriptBackend.ScriptError.speakerUnavailable(resolved)
             }
         }
         let reset = withStatus("Resetting AirPlay speakers...") {
@@ -142,7 +155,9 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
             print("No active AirPlay speakers to reset.")
         } else {
             for s in reset {
-                print("Reset \(s.name) [\(s.volume)].")
+                print(s.reselected
+                    ? "Reset \(s.name) [\(s.volume)]."
+                    : "Lost \(s.name) — could not reselect after reset. Try: music speaker \(s.name)")
             }
         }
     }
@@ -191,30 +206,62 @@ private func runSpeakerTUI() throws {
     }
 }
 
+/// Field-block separator for the bulk device fetch. Linefeed-joined lists per
+/// property, blocks separated by this marker — immune to commas (and `|`) in
+/// device names, unlike the old per-row pipe format.
+let speakerBlockSeparator = "\n=====\n"
+
+/// Pure parse of the 4-block bulk fetch (names / selected / volumes / kinds).
+func parseSpeakerDeviceBlocks(_ raw: String) -> [[String: Any]] {
+    let blocks = raw
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .components(separatedBy: speakerBlockSeparator.trimmingCharacters(in: .whitespaces))
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    guard blocks.count >= 4 else { return [] }
+    let names = blocks[0].components(separatedBy: "\n")
+    let sels = blocks[1].components(separatedBy: "\n")
+    let vols = blocks[2].components(separatedBy: "\n")
+    let kinds = blocks[3].components(separatedBy: "\n")
+    guard names.count == sels.count, names.count == vols.count, names.count == kinds.count else { return [] }
+    return (0..<names.count).compactMap { i in
+        guard !names[i].isEmpty else { return nil }
+        return [
+            "name": names[i],
+            "selected": sels[i] == "true",
+            "volume": Int(vols[i]) ?? 0,
+            "kind": kinds[i]
+        ]
+    }
+}
+
+/// All AirPlay devices in one osascript with 4 bulk Apple Events — measured 6x
+/// faster than the old per-device property loop (0.21s vs 1.23s, 11 devices).
+/// Write-through to the speakers cache so name resolution can skip the live
+/// round-trip entirely.
 func fetchSpeakerDevices() throws -> [[String: Any]] {
     let backend = AppleScriptBackend()
     let result = try syncRun {
         try await backend.runMusic("""
-            set deviceList to every AirPlay device
-            set output to ""
-            repeat with d in deviceList
-                if output is not "" then set output to output & linefeed
-                set output to output & name of d & "|" & selected of d & "|" & sound volume of d & "|" & kind of d
-            end repeat
-            return output
-        """)
+            set astid to AppleScript's text item delimiters
+            set AppleScript's text item delimiters to linefeed
+            set ns to (name of every AirPlay device) as text
+            set sels to (selected of every AirPlay device) as text
+            set vols to (sound volume of every AirPlay device) as text
+            set ks to (kind of every AirPlay device) as text
+            set AppleScript's text item delimiters to astid
+            set sep to linefeed & "=====" & linefeed
+            return ns & sep & sels & sep & vols & sep & ks
+        """, timeout: 20)
     }
-    let lines = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n")
-    return lines.compactMap { line in
-        let parts = line.split(separator: "|", maxSplits: 3).map(String.init)
-        guard parts.count >= 4 else { return nil }
-        return [
-            "name": parts[0],
-            "selected": parts[1] == "true",
-            "volume": Int(parts[2]) ?? 0,
-            "kind": parts[3]
-        ]
+    let devices = parseSpeakerDeviceBlocks(result)
+    if !devices.isEmpty {
+        let speakerResults = devices.enumerated().map { (i, d) in
+            SpeakerResult(index: i + 1, name: d["name"] as! String,
+                          selected: d["selected"] as! Bool, volume: d["volume"] as! Int)
+        }
+        try? ResultCache().writeSpeakers(speakerResults)
     }
+    return devices
 }
 
 // MARK: - AirPlay speaker reset
@@ -222,6 +269,10 @@ func fetchSpeakerDevices() throws -> [[String: Any]] {
 struct SpeakerSnapshot {
     let name: String
     let volume: Int
+    /// Confirmed back in the group after the reset cycle. The old flow reported
+    /// "Reset X" for speakers whose reselect silently failed — X was actually
+    /// DROPPED from the group while the output claimed success.
+    var reselected: Bool = true
 }
 
 /// Reset all active non-local AirPlay speakers: deselect → wait → reselect → restore volumes.
@@ -229,7 +280,6 @@ struct SpeakerSnapshot {
 /// Returns the speakers that were reset, empty if none needed resetting.
 @discardableResult
 func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
-    guard !Music.noWake else { return [] }
     guard let devices = try? fetchSpeakerDevices() else {
         verbose("reset: fetchSpeakerDevices failed, skipping")
         return []
@@ -288,73 +338,52 @@ func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
     verbose("waiting 1.5s for AirPlay reconnect...")
     Thread.sleep(forTimeInterval: 1.5)
 
-    verbose("reset complete: \(speakers.map { $0.name }.joined(separator: ", "))")
-    return speakers
+    // Verify the group actually came back — don't claim success for a speaker
+    // whose reselect silently failed.
+    let after = (try? fetchSpeakerDevices()) ?? []
+    let selectedNow = Set(after.filter { $0["selected"] as? Bool == true }.compactMap { $0["name"] as? String })
+    let outcomes = speakers.map {
+        SpeakerSnapshot(name: $0.name, volume: $0.volume, reselected: after.isEmpty || selectedNow.contains($0.name))
+    }
+    verbose("reset complete: \(outcomes.map { "\($0.name)\($0.reselected ? "" : " (LOST)")" }.joined(separator: ", "))")
+    return outcomes
 }
 
-// MARK: - Speaker name resolution (case-insensitive prefix match)
+// MARK: - Speaker name resolution (case-insensitive exact > prefix > contains)
 
-func resolveSpeakerName(_ input: String, backend: AppleScriptBackend) throws -> String {
-    let result = try syncRun {
-        try await backend.runMusic("get name of every AirPlay device")
-    }
-    let names = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: ",")
-        .map { $0.trimmingCharacters(in: .whitespaces) }
-
+/// Pure match against a name list.
+func matchSpeakerName(_ input: String, in names: [String]) -> String? {
     let lower = input.lowercased()
-    verbose("resolving speaker \"\(input)\" against: \(names.joined(separator: ", "))")
-    if let exact = names.first(where: { $0.lowercased() == lower }) {
-        verbose("resolved \"\(input)\" → \"\(exact)\" (exact match)")
-        return exact
-    }
-    if let prefix = names.first(where: { $0.lowercased().hasPrefix(lower) }) {
-        verbose("resolved \"\(input)\" → \"\(prefix)\" (prefix match)")
-        return prefix
-    }
-    if let contains = names.first(where: { $0.lowercased().contains(lower) }) {
-        verbose("resolved \"\(input)\" → \"\(contains)\" (contains match)")
-        return contains
-    }
+    if let exact = names.first(where: { $0.lowercased() == lower }) { return exact }
+    if let prefix = names.first(where: { $0.lowercased().hasPrefix(lower) }) { return prefix }
+    return names.first { $0.lowercased().contains(lower) }
+}
 
+/// Resolve user input to a device name. Cache-first: speaker names change
+/// ~never, the cache is write-through on every fetch, and skipping the live
+/// round-trip removes an osascript spawn from every named speaker/volume
+/// command. A cache miss (or no cache) falls back to a live fetch — which
+/// also replaces the old comma-split name parse that broke on device names
+/// containing commas.
+func resolveSpeakerName(_ input: String, backend: AppleScriptBackend) throws -> String {
+    if let cached = try? ResultCache().readSpeakers(),
+       let match = matchSpeakerName(input, in: cached.map(\.name)) {
+        verbose("resolved \"\(input)\" → \"\(match)\" (cache)")
+        return match
+    }
+    let names = try fetchSpeakerDevices().compactMap { $0["name"] as? String }
+    verbose("resolving speaker \"\(input)\" against: \(names.joined(separator: ", "))")
+    if let match = matchSpeakerName(input, in: names) {
+        verbose("resolved \"\(input)\" → \"\(match)\" (live)")
+        return match
+    }
     throw AppleScriptBackend.ScriptError.speakerNotFound(name: input, available: names)
 }
 
 func listSpeakers(json: Bool) throws {
-    let backend = AppleScriptBackend()
-    let result = try syncRun {
-        try await backend.runMusic("""
-            set deviceList to every AirPlay device
-            set output to ""
-            repeat with d in deviceList
-                if output is not "" then set output to output & linefeed
-                set output to output & name of d & "|" & selected of d & "|" & sound volume of d & "|" & kind of d
-            end repeat
-            return output
-        """)
-    }
-    let lines = result.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n")
-    let devices: [[String: Any]] = lines.compactMap { line in
-        let parts = line.split(separator: "|", maxSplits: 3).map(String.init)
-        guard parts.count >= 4 else { return nil }
-        return [
-            "name": parts[0],
-            "selected": parts[1] == "true",
-            "volume": Int(parts[2]) ?? 0,
-            "kind": parts[3]
-        ]
-    }
-
-    let cache = ResultCache()
-    let speakerResults = devices.enumerated().map { (i, d) in
-        SpeakerResult(
-            index: i + 1,
-            name: d["name"] as! String,
-            selected: d["selected"] as! Bool,
-            volume: d["volume"] as! Int
-        )
-    }
-    try? cache.writeSpeakers(speakerResults)
+    // fetchSpeakerDevices is the one enumeration (bulk reads + cache write-through);
+    // this used to duplicate the whole script inline.
+    let devices = try fetchSpeakerDevices()
 
     if json {
         let output = OutputFormat(mode: .json)

@@ -6,12 +6,7 @@ disable-model-invocation: true
 
 !`MUSIC_CLI="${MUSIC_CLI:-music}"
 if command -v "$MUSIC_CLI" &>/dev/null; then
-    CURRENT=$(osascript -e 'tell application "Music" to get shuffle enabled' 2>/dev/null)
-    if [ "$CURRENT" = "true" ]; then
-        $MUSIC_CLI shuffle off
-    else
-        $MUSIC_CLI shuffle on
-    fi
+    $MUSIC_CLI shuffle
 else
     osascript -e 'tell application "Music"
         if shuffle enabled then
