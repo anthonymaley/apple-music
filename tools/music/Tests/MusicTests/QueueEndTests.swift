@@ -35,6 +35,31 @@ final class QueueEndTests: XCTestCase {
             prevWasRealPlaylist: true, prevAtLastTrack: true,
             prevNaturalEnd: true, nowIsLibraryAutoplay: false))
     }
+    // MARK: - Cursor snap (the wrong-track-on-Enter bug)
+
+    func testSnapFindsCurrentRowMatchingNewTrack() {
+        let rows = [
+            TrackListEntry(index: 1, name: "A", artist: "X", isCurrent: false),
+            TrackListEntry(index: 2, name: "B", artist: "Y", isCurrent: true),
+        ]
+        XCTAssertEqual(snapCursorIndex(rows: rows, currentKey: trackKey(title: "B", artist: "Y")), 1)
+    }
+
+    func testSnapRefusesStaleWindowWhereCurrentIsTheOldTrack() {
+        // The poller's fast-publish still carries the previous context: a row is
+        // marked current, but it is NOT the new track. Snapping here parked the
+        // cursor on a stale position for good.
+        let rows = [
+            TrackListEntry(index: 1, name: "Old Song", artist: "Old Artist", isCurrent: true),
+            TrackListEntry(index: 2, name: "B", artist: "Y", isCurrent: false),
+        ]
+        XCTAssertNil(snapCursorIndex(rows: rows, currentKey: trackKey(title: "New Song", artist: "New Artist")))
+    }
+
+    func testSnapNilOnEmptyRows() {
+        XCTAssertNil(snapCursorIndex(rows: [], currentKey: trackKey(title: "A", artist: "B")))
+    }
+
     func testContinuationActionMapping() {
         XCTAssertEqual(continuationAction(for: .char("s")), .shuffle)
         XCTAssertEqual(continuationAction(for: .char("p")), .playlist)

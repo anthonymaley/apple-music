@@ -3,6 +3,15 @@ import Foundation
 
 enum ContinuationAction: Equatable { case shuffle, playlist, quiet }
 
+/// Where to snap the Up Next cursor after a track change: the row that is both
+/// marked current AND matches the new track. nil when the rows predate the
+/// change (the fast-publish window still shows the previous context) — the
+/// caller must then NOT consume the change, so the snap retries when the
+/// refreshed rows land. Pure.
+func snapCursorIndex(rows: [TrackListEntry], currentKey: String) -> Int? {
+    rows.firstIndex { $0.isCurrent && trackKey(title: $0.name, artist: $0.artist) == currentKey }
+}
+
 /// `q` is deliberately NOT a continuation key: globally it means quit, and a
 /// user pressing `q` at a queue-ended TUI must leave the app, not pause it.
 func continuationAction(for key: KeyPress) -> ContinuationAction? {
@@ -34,6 +43,7 @@ final class NowPlayingScene: Scene {
     private var pendingPlaylist = ""         // context/ended playlist, for the Shuffle action
     private var pendingFromStopped = false   // menu opened from an auto queue-end (playback stopped)
     private var wantsPlaylists = false
+    private var contextNameNow = ""          // cleaned context name from the latest snapshot
 
     init(backend: AppleScriptBackend, appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
         self.backend = backend
@@ -65,13 +75,18 @@ final class NowPlayingScene: Scene {
             pendingPlaylist = cleanContextName(snapshot.contextName)
         }
         rows = snapshot.surrounding
+        contextNameNow = cleanContextName(snapshot.contextName)
         // Snap the cursor to the current track when the track changes; leave it
-        // alone otherwise so the user can browse Up Next.
+        // alone otherwise so the user can browse Up Next. Consume the change
+        // only when the rows actually contain the new track as current — the
+        // poller's fast-publish snapshot still carries the PREVIOUS window, and
+        // snapping against it parked the cursor on a stale row for good (the
+        // wrong-track-on-Enter bug).
         if case .active(let np) = snapshot.outcome {
             let key = trackKey(title: np.track, artist: np.artist)
-            if key != lastCurrentKey {
+            if key != lastCurrentKey, let i = snapCursorIndex(rows: rows, currentKey: key) {
                 lastCurrentKey = key
-                if let i = rows.firstIndex(where: { $0.isCurrent }) { cursor = i }
+                cursor = i
             }
         }
         if cursor >= rows.count { cursor = max(0, rows.count - 1) }
@@ -251,18 +266,34 @@ final class NowPlayingScene: Scene {
             cursor = min(max(0, rows.count - 1), cursor + 1); return .redraw
         case .enter:
             guard cursor < rows.count else { return .none }
-            // Jump within the app-owned queue by the row's play-order position. For
-            // album/library contexts (no app queue), play the row by title/artist —
-            // `play track N of current playlist` is regressed on macOS 26.x (drops
-            // context to the library), so use the same library lookup the poller's
-            // auto-advance relies on. Duplicate titles resolve to the first match,
-            // the limitation the poller already accepts.
+            // Jump within the app-owned queue by the row's play-order position.
             let backend = self.backend
             if let (pl, pos) = appQueue.jump(to: rows[cursor].index) {
                 actions.run("Play") { try require(playQueueTrack(backend: backend, playlist: pl, position: pos), "Couldn't play that track.") }
-            } else {
-                let row = rows[cursor]
-                actions.run("Play") { try require(playLibraryTrack(backend: backend, title: row.name, artist: row.artist), "'\(row.name)' not found in the library.") }
+                return .redraw
+            }
+            // No app queue: a whole-playlist play (native queue) lands here. Playing
+            // the row from the Library would collapse Music's context to the
+            // alphabetical library (and `play track N of current playlist` is the
+            // macOS 26.x-regressed verb) — so ADOPT the app-owned queue: fetch the
+            // context playlist and take over from this row, same as the Playlists
+            // tab does. Album/library contexts (the context name isn't a playlist,
+            // or the row doesn't line up) fall back to the library lookup.
+            let row = rows[cursor]
+            let context = contextNameNow
+            let store = self.appQueue
+            actions.run("Play") {
+                if !context.isEmpty, !isLibraryContextName(context) {
+                    let tracks = fetchPlaylistTracks(backend: backend, playlist: context)
+                    if row.index >= 1, row.index <= tracks.count,
+                       trackKey(title: tracks[row.index - 1].name, artist: tracks[row.index - 1].artist)
+                           == trackKey(title: row.name, artist: row.artist) {
+                        store.set(AppQueue(playlistName: context, tracks: tracks, currentIndex: row.index))
+                        try require(playQueueTrack(backend: backend, playlist: context, position: row.index), "Couldn't play that track.")
+                        return
+                    }
+                }
+                try require(playLibraryTrack(backend: backend, title: row.name, artist: row.artist), "'\(row.name)' not found in the library.")
             }
             return .redraw
         case .left:
