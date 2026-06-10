@@ -30,27 +30,35 @@ apple-music/
 │       │   ├── JWTGenerator.swift    # ES256 JWT from .p8 key (CryptoKit)
 │       │   └── AuthPage.swift        # MusicKit JS HTML for user token
 │       ├── Commands/
-│       │   ├── PlaybackCommands.swift   # play, pause, skip, back, stop, now, shuffle, repeat
-│       │   ├── SpeakerCommands.swift    # speaker list/set/add/remove/stop
+│       │   ├── PlaybackCommands.swift   # play, pause, skip, back, stop, now, seek, shuffle, repeat
+│       │   ├── LoveCommands.swift       # love/unlove (macOS 26: property is `favorited`)
+│       │   ├── HistoryCommands.swift    # recent (played history), rotation (heavy rotation)
+│       │   ├── SpeakerCommands.swift    # speaker list/set/add/remove/stop/wake
 │       │   ├── VolumeCommands.swift     # vol get/set/up/down/per-speaker
 │       │   ├── AuthCommands.swift       # auth setup/status/open/set-token
 │       │   ├── SearchCommand.swift      # catalog search
-│       │   ├── AddCommand.swift         # add to library
-│       │   ├── PlaylistCommands.swift   # full playlist CRUD + share + temp
+│       │   ├── AddCommand.swift         # add to library / playlists
+│       │   ├── PlaylistCommands.swift   # full playlist CRUD + share + temp (REST writes)
 │       │   ├── DiscoveryCommands.swift  # similar, suggest, new-releases
 │       │   ├── MixCommand.swift         # build mixed playlists
 │       │   └── RemoveCommand.swift      # remove track from playlist
 │       ├── Models/
 │       │   ├── OutputFormat.swift    # --json vs human-readable
-│       │   ├── ResultCache.swift     # domain-specific song/speaker caches
-│       │   └── LibrarySync.swift     # poll-and-retry for REST→AppleScript sync
+│       │   └── ResultCache.swift     # domain-specific song/speaker caches
 │       └── TUI/
 │           ├── Terminal.swift        # raw mode, ANSI codes, key reading
 │           ├── TUILayout.swift       # shared ScreenFrame, renderShell
 │           ├── MultiSelectList.swift # speaker picker, track selector
-│           ├── ListPicker.swift      # playlist browser (2-pane)
+│           ├── ListPicker.swift      # quick pickers (similar/suggest)
 │           ├── VolumeMixer.swift     # per-speaker volume mixer
-│           └── NowPlayingTUI.swift   # now playing with album art + queue
+│           ├── NowPlayingTUI.swift   # legacy now-playing rendering helpers
+│           ├── PlaylistBrowserModel.swift / PlaylistDataSources.swift
+│           └── Shell/                # unified tabbed shell (bare `music`)
+│               ├── Shell.swift / Router.swift / Scene.swift / GlobalKeymap.swift
+│               ├── NowPlayingScene / PlaylistsScene / SpeakersScene
+│               ├── NowPlayingStore / PlaybackPoller / PlaybackContext
+│               ├── AppQueue.swift    # app-owned playlist queue
+│               └── ShellActions / ShellChrome / ShellFrame
 ├── commands/                  # Slash commands (delegate to music CLI, osascript fallback)
 ├── skills/music/SKILL.md      # Conversational skill documenting music CLI surface
 ├── scripts/
@@ -82,9 +90,10 @@ apple-music/
 - Messages.app and Mail.app (for playlist sharing)
 
 ## Deployment
-Published via Claude Code marketplace. Version bumps must update all three locations (see CLAUDE.md).
+Published via Claude Code marketplace. Version bumps must update all four locations (see CLAUDE.md) and rebuild via `scripts/install.sh`. Tag releases (`git tag vX.Y.Z`) and publish a GitHub release (`gh release create`) — releases had silently stopped at v1.6.1 while ten versions shipped untagged.
 
 ## Gotchas
+- **`gh release create --notes` via a quoted heredoc (`<<'EOF'`) keeps backslash escapes literal** — `\\`` shows up verbatim in the published body. Backticks need no escaping inside a quoted heredoc. Read the body back (`gh release view --json body`) before calling it done.
 - **Parameter error (-50)** — Split AirPlay routing and playback into separate osascript calls
 - **MusicKit JS requires HTTP origin** — Auth page served via localhost:8537, not file://
 - **MusicKit framework hangs on macOS CLI** — Use pure REST API + CryptoKit JWT instead
@@ -109,6 +118,8 @@ Published via Claude Code marketplace. Version bumps must update all three locat
 - **Concatenated AppleScript batches fail all-or-nothing under concurrent load** — `onMeta` builds one script for N playlists; at startup the poller + preview fetches hammer Music in parallel, so a batch can transiently error and (with `try? syncRun`) silently return `[:]` — blanking exactly `chunkSize` rows (the giveaway: 8 missing = one failed batch of 8). Each individual playlist works when retried alone. Fixes: (a) wrap each playlist's clause in its own `try` so one bad entry can't abort the batch and partial results survive; (b) the background refresh retries any index that didn't come back, with backoff, until all resolve. Playlist rail metadata is cached to `~/.config/music/playlist-meta.json` (keyed by name) and seeded on launch for an instant paint; the off-thread refresh rewrites it.
 
 ## Current Status
+**1.16.1 — docs synced with reality, first GitHub release since v1.6.1.** README TUI key tables regenerated from `GlobalKeymap.swift` + scene handlers (the old table predated the tabbed shell); guide.md counts (14 commands / 24 subcommands), source tree, and 4-location version rule refreshed; SKILL.md description gained favorites/seek/listening-history triggers; playbook tree updated (Shell/, LoveCommands, HistoryCommands). Tagged `v1.16.1` + GitHub release published (notes digest 1.7.0→1.16.1). Tend audit: structure clean; OPEN — the `.gitignore` "Dev-only files" block is a no-op (its files are tracked); decide intent, then remove the dead entries + on-disk `.DS_Store`s.
+
 **1.16.0 — review backlog cleared (verified live).** TUI: PgUp/PgDn/Home/End everywhere + Shift-Tab reverse cycle; arrows navigate WHILE filtering (fzf-style); one selection language (inverse-video cursor on all tabs); empty Now tab is an on-ramp ("press 2 / z"); art skipped below 52 cols (it corrupted narrow frames); `l` favorites the current track (toast feedback). CLI: `music seek +30|90|1:30` (gotcha: `round (player position)` inline errors -1700 — assign to a var first; and the position readback lags a `set` while paused, hence the `delay 0.2`), `music love`/`unlove` (macOS 26: property is `favorited`; `loved` errors -10001, verified live), `music recent` (gotcha: docs say `/recent/played-tracks` but the live API serves `/recent/played/tracks` — hyphenated 404s; verified live, results feed ResultCache so `play N` chains), `music rotation` (endpoint reachable; this account's heavy-rotation is empty). Field delimiter hardening: track-data scripts/parsers use ASCII unit separator (`asFieldSep`) instead of `|` — titles like "Intro | Outro" no longer shift fields. Plugin: `/music:repeat` added (14 commands now), play.md collapsed to the CLI's native smart parsing, statusline prefers jq. Hygiene: AppQueueStore step/jump/shuffle-order finally tested (the 1.10.0 core), OutputFormat.renderHuman deterministic. Suite: 107 tests green.
 
 **1.15.0 — AirPlay performance + stability, CLI ergonomics (verified live).** AppleScriptBackend has a watchdog: every osascript is killed after `timeout` (default 45s) and throws `ScriptError.timeout` — before this, one hung `set selected` (sleeping HomePod) blocked the shell's whole serial action queue for up to the 2-minute Apple Event timeout or forever; pipes are now read before `waitUntilExit` (deadlock fix); -1728 "Can't get AirPlay device" maps to the actionable `speakerUnavailable`. `fetchSpeakerDevices` is ONE bulk script (4 Apple Events total — measured 6x faster than the per-device loop: 0.21s vs 1.23s for 11 devices), linefeed-block format immune to commas in device names, write-through to the speakers cache; `resolveSpeakerName` is cache-first (named speaker/volume commands: 3 spawns → 1, measured 0.28s). `showNowPlaying` no longer enumerates AirPlay inside its 10× retry loop. `speaker X only` selects the target FIRST (the old deselect-all-then-select could leave NO outputs if the target failed) with per-device try. `speaker wake` verifies each speaker is actually back in the group and prints "Lost X" honestly (it used to claim Reset for silently dropped speakers); SpeakersScene un-wedges a stuck background fetch after 30s. Ergonomics: `music similar Hotel California` parses as one title (+`--artist`); `music shuffle` toggles with no arg (slash command simplified); `music volume abc` errors instead of silent exit-0; `playlist delete` confirms on a TTY (`--force` skips); `--json` honored on remove/volume/shuffle/playlist create/add/delete; dead `--no-wake` flag removed. Docs: bare `music` is the MAIN TUI; the four quick pickers (speaker/volume/similar/suggest) are blessed one-shots backing the slash commands. NOT live-tested: the watchdog firing on a real hang (no sleeping HomePod available during the session) — logic is simple and unit-reasoned, tagged for the next natural occurrence.

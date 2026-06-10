@@ -2,19 +2,20 @@
 
 Current high-priority follow-ups before a broad public push.
 
-## Current Session (2026-06-09 — full review → seven releases, 1.11.2 → 1.16.0) — DONE
+## Current Session (2026-06-10 — doc sync + v1.16.1 release package + tend audit) — DONE
 
-**Done.** Ran a three-agent review (perf / design-UX / features-architecture) of the whole app, then cleared the entire finding list in bundles, each shipped + live-verified same-day. Suite went 85 → 107 tests. All pushed.
+**Done.** Synced all docs with 1.16.0 reality, shipped v1.16.1 (docs-only patch), and published the first GitHub release since v1.6.1. Ran `/kerd:tend`: 7 passing, 2 warnings.
 
-- [x] **1.11.2 quick wins:** `music remove` playlist-name escaping bug; album-context Enter-jump off the regressed verb; dead code deleted (−8 tests of dead coverage); doc drift (playbook header, 14→13 commands, SKILL.md stale keys).
-- [x] **1.12.0 TUI responsiveness:** poller fast-publishes metadata before context+artwork; art cache per album|artist (drop chafa `--work 9`); lean 1s poll (no AirPlay enumeration); preview fetches off the input loop; render-on-change (store generation + scene dirty flag). Track change visible ≤1.2s (was 1-3s+).
-- [x] **1.13.0 feedback channel:** StatusStore footer toast; ActionRunner serial queue for all user-initiated osascript (input loop never blocks); coalesced volume keys; async speakers/track-list loads; continuation-menu Quiet `q`→`x` (q quits), Esc dismisses.
-- [x] **1.14.0 REST playlist writes:** `createPlaylist(name:songIDs:)` + `addTracksToPlaylist` replace the addToLibrary→sleep-4s→AppleScript-duplicate dance at all six sites (create-with-tracks 0.56s, add 1.2s, measured); `libraryTrackLookupScript` single definition; `waitForLocalPlaylist` bounded poll. Behavior change: playlist adds no longer copy songs into the library.
-- [x] **1.14.1 regression fix (user-reported):** two stacked bugs — fast-publish broke the cursor snap (wrong-track-on-Enter; `snapCursorIndex` only consumes a track change when the rows contain it), and native-playlist-context Enter collapsed to the alphabetical library (now ADOPTS the app queue from the context playlist).
-- [x] **1.15.0 AirPlay deep dive:** osascript watchdog timeout (45s; one hung `set selected` used to freeze the whole action queue); pipe-order deadlock fix; -1728→speakerUnavailable; bulk device reads (6x measured: 0.21s vs 1.23s); cache-first name resolution (named commands 3 spawns→1); `only` selects target first (could empty ALL outputs); wake verifies reselection ("Lost X" honesty); ergonomics (similar variadic, volume validation, shuffle toggle, delete confirm, --json sweep).
-- [x] **1.16.0 backlog cleared:** PgUp/PgDn/Home/End + Shift-Tab; arrows-while-filtering; unified inverse-video selection; empty-state CTA; narrow-art guard; `l` favorite key; `music seek/love/unlove/recent/rotation`; ASCII-unit-separator field hardening; AppQueueStore finally tested; `/music:repeat`; play.md collapsed to CLI parsing; statusline prefers jq.
+- [x] **README:** TUI key tables rewritten from source (`GlobalKeymap.swift` + scene handlers — old table predated the tabbed shell); added `/music:repeat`, `seek/love/unlove`, `recent/rotation`; auth matrix rows; statusline path 1.7.0→1.16.1.
+- [x] **docs/guide.md:** 14 commands / 24 subcommands; current TUI contract + full keymap; real source tree (Shell/, LoveCommands, HistoryCommands); 4-location version rule.
+- [x] **SKILL.md description:** added favorites / seek / listening-history triggers.
+- [x] **v1.16.1** in all four locations; CLI rebuilt (`music --version` confirms); 107 tests green; commit `98a0dd2` pushed.
+- [x] **GitHub release v1.16.1** published + tagged — notes digest everything since v1.6.1 (April). Gotcha hit and fixed: quoted heredoc kept `\`` escapes literal in the release body; re-uploaded clean notes.
+- [x] **`/kerd:tend`:** structure healthy (vault, hooks, naming, skills all pass). Two warnings, both UNRESOLVED — see open question below.
 
-**Watch-items (not blocking):**
+**Open question (blocks the tend fixes):** the `.gitignore` "Dev-only files" block lists CLAUDE.md, TODO.md, .slainte, kivna/, docs/playbook.md — but `git ls-files` shows they're all TRACKED, so those entries are no-ops and the "not shipped to consumers" comment is false (tracked files ship with every clone). Only AGENTS.md and docs/naming.md are genuinely ignored. Asked what the block's original intent was; not yet answered. **New evidence at switch-out: the `kivna/` entry blocked `git add` of the new session log (needed `-f`) — the block actively breaks the handoff convention for any NEW kivna file.** Recommendation: delete the dead entries. Also pending: delete 15 on-disk `.DS_Store` files (untracked, zero repo risk).
+
+**Watch-items (carried, not blocking):**
 1. **osascript watchdog firing on a real hang is NOT live-verified** — needs a naturally sleeping HomePod; logic is simple, flagged in playbook.
 2. `music rotation` works but this account's heavy-rotation is empty — re-check after more listening.
 3. Empty-Now-tab CTA render not visually confirmed (the 4-poll stop tolerance outlasted the capture window); change is a one-line render branch.
