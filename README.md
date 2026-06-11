@@ -249,7 +249,7 @@ For anything multi-step, just talk. Claude composes the right sequence of CLI ca
 
 Claude handles multi-step orchestration — searching the catalog, creating playlists, routing to speakers, setting volume, sharing — all from one sentence.
 
-## Interactive TUI
+## Apple Music TUI
 
 Run bare `music` in a real terminal (not inside Claude Code — TUI requires a TTY). Install `chafa` (`brew install chafa`) for album art in now-playing.
 
