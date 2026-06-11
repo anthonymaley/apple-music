@@ -46,7 +46,7 @@ Control Apple Music, AirPlay speakers, and AirPods from Claude Code or the termi
 
 | Layer | How | Setup | Token cost |
 |-------|-----|-------|-----------|
-| **Slash commands** (`/music:play`) | Type and run, instant | None | None |
+| **Slash commands** (`/music:play`) | Transport: play, skip, speakers, volume — type and run, instant | None | None |
 | **CLI** (`music now`, `music speaker`) | Terminal commands, TUI, scriptable | Build from source | None |
 | **CLI + API** (`music search`, `music playlist create`) | Catalog, library, discovery | + Apple Developer account | None |
 | **Natural language** ("play house on the kitchen") | Claude orchestrates CLI calls | Depends on features used | Normal |
@@ -252,6 +252,8 @@ For anything multi-step, just talk. Claude composes the right sequence of CLI ca
   style. Put them in a playlist and shuffle them.
 
 > It's great. Share it with Julie on iMessage.
+
+> Play Kid A by Radiohead in the kitchen and living room at 60%.
 
 > Switch to my AirPods and turn it down to 30.
 
