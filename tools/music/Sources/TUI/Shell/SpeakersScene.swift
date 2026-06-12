@@ -44,6 +44,8 @@ final class SpeakersScene: Scene {
     private let status: StatusStore
     private let actions: ActionRunner
     private let speakerTargets = TargetAccumulator()
+    private let eqTargetLock = NSLock()
+    private var eqTarget: String? = nil
     private var rows: [SpeakerRow] = []
     private var cursor = 0
     private var eqState: EQSnapshot? = nil
@@ -84,7 +86,9 @@ final class SpeakersScene: Scene {
                 rows = fresh
                 everLoaded = true
                 if let name = cursorName, let i = rows.firstIndex(where: { $0.name == name }) { cursor = i }
-                if cursor >= rows.count { cursor = max(0, rows.count - 1) }
+                let displayCount = speakersDisplayRows(speakerCount: rows.count, expanded: eqExpanded,
+                                                       presetNames: pickerPresetNames).count
+                if cursor >= displayCount { cursor = max(0, displayCount - 1) }
                 changed = true
             }
         }
@@ -178,7 +182,7 @@ final class SpeakersScene: Scene {
                 let dot = (eqState?.enabled == true)
                     ? "\(ANSICode.lime)\u{25CF}\(ANSICode.reset)"
                     : "\(ANSICode.dim)\u{25CB}\(ANSICode.reset)"
-                let presetName = eqState?.current ?? "none"
+                let presetName = truncText(eqState?.current ?? "none", to: nameW - 4)
                 let label = "EQ  \(presetName)"
                 let padLabel = label + String(repeating: " ", count: max(0, nameW - label.count))
                 let labelStr: String
@@ -195,7 +199,8 @@ final class SpeakersScene: Scene {
                 out += ANSICode.moveTo(row: y, col: 5)
                 let isCurrent = eqState?.current == name
                 let bullet = isCurrent ? "\u{25CF}" : " "
-                let padName = name + String(repeating: " ", count: max(0, nameW - name.count))
+                let truncName = truncText(name, to: nameW)
+                let padName = truncName + String(repeating: " ", count: max(0, nameW - truncName.count))
                 let nameStr: String
                 if isCursor {
                     nameStr = "\(ANSICode.inverse)\(padName)\(ANSICode.reset)"
@@ -209,10 +214,10 @@ final class SpeakersScene: Scene {
             }
         }
 
-        // Show loading hint in the speaker section when no speakers have loaded yet.
-        if rows.isEmpty && !everLoaded && y <= bottom {
+        // Show a status message in the speaker section when there are no speakers.
+        if rows.isEmpty && y <= bottom {
             out += ANSICode.moveTo(row: y, col: 3)
-            let msg = "Loading speakers\u{2026}"
+            let msg = everLoaded ? "No AirPlay outputs found." : "Loading speakers\u{2026}"
             out += "\(ANSICode.dim)\(msg)\(ANSICode.reset)"
         }
 
@@ -286,7 +291,7 @@ final class SpeakersScene: Scene {
                 let names = pickerPresetNames
                 guard !names.isEmpty else { return .none }
                 let idx = eqState?.current.flatMap { n in names.firstIndex(of: n) } ?? -1
-                let newIdx = ((idx - 1) + names.count) % names.count
+                let newIdx = idx == -1 ? names.count - 1 : (idx - 1 + names.count) % names.count
                 selectEQPreset(names[newIdx])
                 return .redraw
             default:
@@ -344,13 +349,18 @@ final class SpeakersScene: Scene {
         eqState?.current = name
         eqState?.enabled = true
         lastMutation = Date()
+        eqTargetLock.lock(); eqTarget = name; eqTargetLock.unlock()
         actions.run("EQ") {
-            if let venue = VenuePack.preset(named: name) {
+            self.eqTargetLock.lock()
+            let target = self.eqTarget; self.eqTarget = nil
+            self.eqTargetLock.unlock()
+            guard let target else { return }
+            if let venue = VenuePack.preset(named: target) {
                 try require((try? eqEnsurePreset(self.backend, preset: venue)) != nil,
-                            "Couldn't create preset '\(name)'.")
+                            "Couldn't create preset '\(target)'.")
             }
-            try require((try? eqSetCurrent(self.backend, name: name)) != nil,
-                        "Couldn't select preset '\(name)'.")
+            try require((try? eqSetCurrent(self.backend, name: target)) != nil,
+                        "Couldn't select preset '\(target)'.")
             try require((try? eqSetEnabled(self.backend, true)) != nil,
                         "Couldn't enable EQ.")
         }
