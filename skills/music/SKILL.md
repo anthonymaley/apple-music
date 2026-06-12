@@ -94,7 +94,11 @@ music volume kitchen 80                          # set Kitchen to 80 (name resol
 ## Equalizer (no auth)
 
 Real Music.app EQ control. Venue presets are created on first selection and
-persist as real presets (visible in Music's own EQ window).
+persist as real presets (visible in Music's own EQ window). Live EQ control
+drives the Equalizer window via UI scripting (Music's scripting API for live
+EQ state is broken): it needs Accessibility permission for the terminal and
+opens the Equalizer window. On a permission error, relay the command's hint —
+it names the exact System Settings toggle.
 
 | Request | Command |
 |---|---|

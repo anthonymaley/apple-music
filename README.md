@@ -171,6 +171,8 @@ Naming speakers in `music play` routes playback to **exactly those speakers** �
 
 Venue pack (Nightclub, Dungeon, Open Air, Concert Hall, Jazz Club, Stadium, Cathedral, Late Night) — each is a real Music.app preset created on first selection and visible in Music's own EQ window. Selecting any preset auto-enables EQ. Unknown names print near-matches.
 
+> **Equalizer requires Accessibility permission.** Music's scripting interface for live EQ state is broken in current macOS builds, so `music eq` drives the real Equalizer window instead (which it opens and leaves open). Grant your terminal app access under System Settings → Privacy & Security → Accessibility — the command tells you if it's missing. Preset creation and deletion need no extra permission.
+
 ## CLI Commands
 
 ```
