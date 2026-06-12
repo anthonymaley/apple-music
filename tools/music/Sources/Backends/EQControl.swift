@@ -42,8 +42,14 @@ private func eqUIScript(_ body: String) -> String {
     tell application "System Events"
         tell process "Music"
             if not (exists window "Equalizer") then
-                click menu item "Equalizer" of menu "Window" of menu bar 1
+                -- A `launch`ed-but-never-activated Music sits windowless and
+                -- ignores menu clicks; `reopen` (dock-click semantics) restores
+                -- its windows without stealing focus. Only done when we're
+                -- about to open the Equalizer anyway.
+                tell application "Music" to reopen
                 delay 0.5
+                click menu item "Equalizer" of menu "Window" of menu bar 1
+                delay 0.7
             end if
             tell window "Equalizer"
                 \(body)
