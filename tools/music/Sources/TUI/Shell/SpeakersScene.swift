@@ -38,7 +38,7 @@ func speakersDisplayRows(speakerCount: Int, expanded: Bool,
 final class SpeakersScene: Scene {
     let id: SceneID = .speakers
     let tabTitle = "Speakers"
-    var footerHint: String { "\u{2191}\u{2193} Move  Enter Toggle/Select  \u{2190}\u{2192} Volume/Preset" }
+    var footerHint: String { "\u{2191}\u{2193} Move  Enter Toggle/Select  \u{2190}\u{2192} Volume/Preset  e EQ on/off" }
 
     private let backend: AppleScriptBackend
     private let status: StatusStore
@@ -244,6 +244,18 @@ final class SpeakersScene: Scene {
         }
 
         switch key {
+        case .char("e"), .char("E"):
+            // EQ on/off from anywhere in the scene. eqSetEnabled is a
+            // check-then-click, so rapid toggles stay cheap and idempotent.
+            let on = !(eqState?.enabled ?? false)
+            if eqState == nil { eqState = EQSnapshot(enabled: on, current: nil, presets: []) }
+            else { eqState?.enabled = on }
+            lastMutation = Date()
+            actions.run("EQ") {
+                try require((try? eqSetEnabled(self.backend, on)) != nil,
+                            "Couldn't turn EQ \(on ? "on" : "off").")
+            }
+            return .redraw
         case .up:
             cursor = max(0, cursor - 1); return .redraw
         case .down:
