@@ -18,7 +18,7 @@ func resolveGlobalKey(_ key: KeyPress) -> GlobalAction? {
     case .char("-"): return .volumeDown
     case .char(">"), .char("."), .f9: return .next
     case .char("<"), .char(","), .f7: return .prev
-    case .char("z"), .char("r"): return .shuffle   // 'r' (was radio) now also shuffles
+    case .char("z"): return .shuffle               // 'r' reclaimed for repeat in Now Playing
     case .char("q"): return .quit
     case .char(let c) where c.isNumber:
         guard let n = c.wholeNumberValue, n >= 1 else { return nil }

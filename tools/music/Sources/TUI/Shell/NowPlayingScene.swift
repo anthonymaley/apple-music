@@ -26,7 +26,7 @@ func continuationAction(for key: KeyPress) -> ContinuationAction? {
 final class NowPlayingScene: Scene {
     let id: SceneID = .nowPlaying
     let tabTitle = "Now"
-    var footerHint: String { "\u{2191}\u{2193} Browse  Enter Jump  \u{2190}\u{2192} Seek  l \u{2665}  n Next\u{2011}up" }
+    var footerHint: String { "\u{2191}\u{2193} Browse  \u{2190}\u{2192} Seek  l \u{2665}  s/m Shuffle  r Repeat  g Genius  n Next\u{2011}up" }
 
     private let backend: AppleScriptBackend
     private let appQueue: AppQueueStore
@@ -44,6 +44,16 @@ final class NowPlayingScene: Scene {
     private var pendingFromStopped = false   // menu opened from an auto queue-end (playback stopped)
     private var wantsPlaylists = false
     private var contextNameNow = ""          // cleaned context name from the latest snapshot
+
+    // Shuffle/repeat state, fetched on a background inbox (the poller is left
+    // untouched). Mirrors SpeakersScene's EQ inbox.
+    private var modes: PlaybackModes? = nil
+    private let modesLock = NSLock()
+    private var inboxModes: PlaybackModes? = nil
+    private var modesFetchInFlight = false
+    private var modesFetchStartedAt = Date.distantPast
+    private var lastModesMutation = Date.distantPast
+    private var lastModesKick = Date.distantPast
 
     init(backend: AppleScriptBackend, appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
         self.backend = backend
@@ -90,9 +100,35 @@ final class NowPlayingScene: Scene {
             }
         }
         if cursor >= rows.count { cursor = max(0, rows.count - 1) }
-        // Everything above is a pure function of the snapshot; the store's
-        // generation counter already triggers the repaint when it changes.
-        return false
+
+        // Shuffle/repeat: drain the background inbox, then kick a fresh fetch
+        // every ~2s. A fetch that started before the user's last toggle is
+        // stale (would revert the optimistic update), so it's dropped.
+        var changed = false
+        modesLock.lock()
+        let freshModes = inboxModes; inboxModes = nil
+        modesLock.unlock()
+        if let freshModes, modesFetchStartedAt > lastModesMutation, freshModes != modes {
+            modes = freshModes
+            changed = true
+        }
+        let now = Date()
+        if !modesFetchInFlight, now.timeIntervalSince(lastModesKick) > 2 {
+            modesFetchInFlight = true
+            modesFetchStartedAt = now
+            lastModesKick = now
+            DispatchQueue.global().async { [weak self] in
+                guard let self else { return }
+                let m = try? fetchPlaybackModes(self.backend)
+                self.modesLock.lock()
+                self.inboxModes = m
+                self.modesFetchInFlight = false
+                self.modesLock.unlock()
+            }
+        }
+        // The snapshot-derived state above repaints via the store's generation
+        // counter; `changed` covers a modes update that the generation misses.
+        return changed
     }
 
     func render(frame: ShellFrame, snapshot: NowPlayingSnapshot) -> String {
@@ -151,6 +187,17 @@ final class NowPlayingScene: Scene {
         my += 2
         if !snapshot.contextName.isEmpty {
             out += ANSICode.moveTo(row: my, col: leftX) + "\(ANSICode.cyan)\u{266A} \(ANSICode.reset)\(ANSICode.brightWhite)\(truncText(cleanContextName(snapshot.contextName), to: metaW - 3))\(ANSICode.reset)"
+        }
+
+        // Playback modes: live shuffle + repeat state (s shuffle, m mode, r repeat, g Genius).
+        if let m = modes {
+            let modesY = my + 1
+            if modesY <= (frame.bodyY + frame.bodyHeight - 1) {
+                let shuf = m.shuffleEnabled ? "on \u{00B7} \(m.shuffleMode.rawValue)" : "off"
+                let line = "\u{21C4} \(shuf)   \u{21BB} \(m.songRepeat.rawValue)"
+                out += ANSICode.moveTo(row: modesY, col: leftX)
+                out += "\(ANSICode.dim)\(truncText(line, to: metaW))\(ANSICode.reset)"
+            }
         }
 
         // --- Up Next: right pane (wide) or below the metadata (narrow) ---
@@ -339,6 +386,38 @@ final class NowPlayingScene: Scene {
             return .redraw
         case .right:
             actions.run("Seek") { _ = try syncRun { try await self.backend.runMusic("set player position to (player position + 30)") } }
+            return .redraw
+        case .char("s"), .char("S"):
+            // Shuffle on/off (Music's `shuffle enabled` flag). Distinct from the
+            // global `z`, which shuffle-plays the current context.
+            let on = !(modes?.shuffleEnabled ?? false)
+            modes?.shuffleEnabled = on
+            lastModesMutation = Date()
+            actions.run("Shuffle") {
+                try require((try? setShuffleEnabled(self.backend, on)) != nil, "Couldn't set shuffle.")
+            }
+            return .redraw
+        case .char("m"), .char("M"):
+            let next = (modes?.shuffleMode ?? .songs).next
+            modes?.shuffleMode = next
+            lastModesMutation = Date()
+            actions.run("Shuffle mode") {
+                try require((try? setShuffleMode(self.backend, next)) != nil, "Couldn't set shuffle mode.")
+            }
+            return .redraw
+        case .char("r"), .char("R"):
+            let next = (modes?.songRepeat ?? .off).next
+            modes?.songRepeat = next
+            lastModesMutation = Date()
+            actions.run("Repeat") {
+                try require((try? setSongRepeat(self.backend, next)) != nil, "Couldn't set repeat.")
+            }
+            return .redraw
+        case .char("g"), .char("G"):
+            // Genius Shuffle rebuilds the queue from the current song (UI-scripted).
+            actions.run("Genius") {
+                try require((try? triggerGeniusShuffle(self.backend)) != nil, "Genius Shuffle failed.")
+            }
             return .redraw
         default:
             return .none
