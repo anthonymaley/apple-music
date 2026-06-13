@@ -5,7 +5,7 @@ struct Music: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "music",
         abstract: "Control Apple Music from the terminal.",
-        version: "3.1.0",
+        version: "3.2.0",
         subcommands: [
             // Playback
             Play.self,
@@ -23,6 +23,7 @@ struct Music: ParsableCommand {
             Speaker.self,
             Vol.self,
             EQ.self,
+            Visualizer.self,
             // Auth
             Auth.self,
             // Catalog

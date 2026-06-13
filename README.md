@@ -173,6 +173,15 @@ Venue pack (Nightclub, Dungeon, Open Air, Concert Hall, Jazz Club, Stadium, Cath
 
 > **Equalizer requires Accessibility permission.** Music's scripting interface for live EQ state is broken in current macOS builds, so `music eq` drives the real Equalizer window instead (which it opens and leaves open). Grant your terminal app access under System Settings → Privacy & Security → Accessibility — the command tells you if it's missing. Preset creation and deletion need no extra permission.
 
+### Visualizer
+
+| Command | What it does |
+|---------|-------------|
+| `music visualizer` | Show visualizer on/off status |
+| `music visualizer on` / `off` | Toggle Music's on-screen visualizer (the Cmd-T visuals) |
+
+Toggles Music's built-in visualizer — the animated graphics that render **in the Music app window on your Mac's display** (not on AirPlay outputs). Turning it on brings Music to the front. Same Accessibility permission as the equalizer; in the TUI, the Speakers scene has a Visualizer row (`Enter` or `v` toggles).
+
 ## CLI Commands
 
 ```

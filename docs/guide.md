@@ -71,6 +71,7 @@ Current TUI contract:
 - Keys: `1/2/3` jump to a tab, `Tab`/`Shift-Tab` cycle, `↑↓` + `PgUp/PgDn/Home/End` navigate, `Space` play/pause, `</>` previous/next, `←→` seek (Now) or per-speaker volume (Speakers), `z`/`r` shuffle, `l` favorite, `+/-` master volume, `n` next-up options, `Esc` back, `q` quit.
 - Speaker wake is explicit via `music speaker wake`; normal playback does not auto-reset AirPlay outputs.
 - The Speakers scene has an **EQ block**: an `EQ on/off` power row (`Enter` toggles it; `e` does the same from anywhere in the scene) and a `Preset` row beneath it — `Enter` expands an inline preset picker (venue pack first, then Music's built-in presets), `↑↓` to navigate, `Enter` to select and auto-enable EQ, `Escape` to collapse without changing the preset. With the Preset row highlighted but the picker collapsed, `←`/`→` quick-cycles presets one at a time.
+- Below the EQ block, a **Visualizer** row toggles Music's on-screen visualizer (`Enter`, or `v` from anywhere in the scene). GUI-only — the visuals render in the Music window on the Mac's display, and turning it on brings Music forward.
 - Music's Autoplay (∞) must stay OFF — playlist track-selection drives playback track-by-track and relies on each track stopping at its end.
 
 ### 4. Status Line

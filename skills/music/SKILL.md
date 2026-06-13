@@ -113,6 +113,13 @@ Cathedral, Late Night. Any other name forwards verbatim — Music's built-in
 presets (Acoustic, Hip-Hop, Loudness, …) all resolve. Unknown names print
 near-matches.
 
+## Visualizer (no auth)
+
+`music visualizer [on|off]` toggles Music's on-screen visualizer (the Cmd-T
+visuals). Same UI-scripting + Accessibility requirement as the equalizer.
+GUI-only: the visuals render in the Music window on the Mac's display (not on
+AirPlay outputs), and turning it on brings Music to the front.
+
 ## Catalog Search (developer token only)
 
 ```bash

@@ -27,6 +27,7 @@ enum SpeakersDisplayRow: Equatable {
     case eqPower
     case eq
     case preset(String)
+    case visualizer
 }
 
 func speakersDisplayRows(speakerCount: Int, expanded: Bool,
@@ -35,13 +36,14 @@ func speakersDisplayRows(speakerCount: Int, expanded: Bool,
     rows.append(.eqPower)
     rows.append(.eq)
     if expanded { rows += presetNames.map { .preset($0) } }
+    rows.append(.visualizer)
     return rows
 }
 
 final class SpeakersScene: Scene {
     let id: SceneID = .speakers
     let tabTitle = "Speakers"
-    var footerHint: String { "\u{2191}\u{2193} Move  Enter Toggle/Select  \u{2190}\u{2192} Volume/Preset  e EQ on/off" }
+    var footerHint: String { "\u{2191}\u{2193} Move  Enter Toggle/Select  \u{2190}\u{2192} Volume/Preset  e EQ  v Visualizer" }
 
     private let backend: AppleScriptBackend
     private let status: StatusStore
@@ -53,6 +55,7 @@ final class SpeakersScene: Scene {
     private var cursor = 0
     private var eqState: EQSnapshot? = nil
     private var eqExpanded = false
+    private var visualizerOn: Bool? = nil
 
     // Background refresh, inbox pattern: tick() kicks fetches and drains results.
     // The scene used to load once and never again — devices appearing/vanishing
@@ -60,6 +63,7 @@ final class SpeakersScene: Scene {
     private let inboxLock = NSLock()
     private var inbox: [SpeakerRow]? = nil
     private var inboxEQ: EQSnapshot? = nil   // guarded by inboxLock
+    private var inboxVis: Bool? = nil        // guarded by inboxLock
     private var fetchInFlight = false                 // tick()-thread only
     private var fetchStartedAt = Date.distantPast     // tick()-thread only
     private var lastFetchKickoff = Date.distantPast   // tick()-thread only
@@ -81,6 +85,7 @@ final class SpeakersScene: Scene {
         inboxLock.lock()
         let fresh = inbox; inbox = nil
         let freshEQ = inboxEQ; inboxEQ = nil
+        let freshVis = inboxVis; inboxVis = nil
         inboxLock.unlock()
         if let fresh {
             fetchInFlight = false
@@ -97,6 +102,10 @@ final class SpeakersScene: Scene {
         }
         if let freshEQ, fetchStartedAt > lastMutation {
             eqState = freshEQ
+            changed = true
+        }
+        if let freshVis, fetchStartedAt > lastMutation {
+            visualizerOn = freshVis
             changed = true
         }
         // Refresh on (re)entry — tick only runs while this scene is active, so a
@@ -118,11 +127,14 @@ final class SpeakersScene: Scene {
             lastFetchKickoff = now
             DispatchQueue.global().async { [weak self] in
                 let result = speakerRows(from: (try? fetchSpeakerDevices()) ?? [])
-                let eq = try? fetchEQSnapshot(self?.backend ?? AppleScriptBackend())
+                let backend = self?.backend ?? AppleScriptBackend()
+                let eq = try? fetchEQSnapshot(backend)
+                let vis = try? visualizerStatus(backend)
                 guard let self else { return }
                 self.inboxLock.lock()
                 self.inbox = result
                 self.inboxEQ = eq
+                self.inboxVis = vis
                 self.inboxLock.unlock()
             }
         }
@@ -231,6 +243,30 @@ final class SpeakersScene: Scene {
                 }
                 out += "\(bullet) \(nameStr)"
                 y += 1
+
+            case .visualizer:
+                // Blank line before the visualizer row when space allows.
+                if y + 1 <= bottom {
+                    y += 1
+                }
+                guard y <= bottom else { break }
+                out += ANSICode.moveTo(row: y, col: 3)
+                let on = visualizerOn == true
+                let dot = on
+                    ? "\(ANSICode.lime)\u{25CF}\(ANSICode.reset)"
+                    : "\(ANSICode.dim)\u{25CB}\(ANSICode.reset)"
+                let label = "Visualizer  \(on ? "on" : "off")"
+                let padLabel = label + String(repeating: " ", count: max(0, nameW + 4 - label.count))
+                let labelStr: String
+                if isCursor {
+                    labelStr = "\(ANSICode.inverse)\(padLabel)\(ANSICode.reset)"
+                } else if on {
+                    labelStr = "\(ANSICode.brightWhite)\(padLabel)\(ANSICode.reset)"
+                } else {
+                    labelStr = padLabel
+                }
+                out += "  \(dot) \(labelStr)"
+                y += 1
             }
         }
 
@@ -267,6 +303,9 @@ final class SpeakersScene: Scene {
         case .char("e"), .char("E"):
             toggleEQ()
             return .redraw
+        case .char("v"), .char("V"):
+            toggleVisualizer()
+            return .redraw
         case .up:
             cursor = max(0, cursor - 1); return .redraw
         case .down:
@@ -301,6 +340,9 @@ final class SpeakersScene: Scene {
                 return .redraw
             case .preset(let name):
                 selectEQPreset(name)
+                return .redraw
+            case .visualizer:
+                toggleVisualizer()
                 return .redraw
             case nil:
                 return .none
@@ -380,6 +422,19 @@ final class SpeakersScene: Scene {
         actions.run("EQ") {
             try require((try? eqSetEnabled(self.backend, on)) != nil,
                         "Couldn't turn EQ \(on ? "on" : "off").")
+        }
+    }
+
+    /// Music's on-screen visualizer on/off. visualizerSetEnabled reads then
+    /// clicks only if needed, so repeated toggles stay idempotent. Turning it
+    /// on brings Music to the front (the visuals render in Music's window).
+    private func toggleVisualizer() {
+        let on = !(visualizerOn ?? false)
+        visualizerOn = on
+        lastMutation = Date()
+        actions.run("Visualizer") {
+            try require((try? visualizerSetEnabled(self.backend, on)) != nil,
+                        "Couldn't turn visualizer \(on ? "on" : "off").")
         }
     }
 
