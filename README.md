@@ -14,7 +14,7 @@
 ![Release](https://img.shields.io/github/v/release/anthonymaley/apple-music)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
-Control Apple Music, AirPlay speakers, and AirPods from Claude Code or the terminal — a Claude Code skill, CLI, and interactive Apple Music TUI for macOS.
+Control Apple Music, AirPlay speakers, and AirPods from Claude Code or the terminal — a Claude Code skill, CLI, and interactive Apple Music TUI for macOS. Multi-room playback, playlists, a real equalizer with venue presets, the on-screen visualizer, and shuffle/repeat/Genius controls.
 
 ```
   ┌─────────────────────────────────────────────────────────────────────┐
@@ -294,7 +294,7 @@ Run bare `music` in a real terminal (not inside Claude Code — TUI requires a T
 | `Tab` / `Shift-Tab` | Cycle tabs forward / backward |
 | `Space` | Play/pause |
 | `<` / `>` | Previous / next track (full up/down through the playlist) |
-| `z` / `r` | Shuffle |
+| `z` | Shuffle-play the current context |
 | `+`/`-` | Master volume ±5 |
 | `q` | Quit |
 
@@ -302,15 +302,18 @@ Run bare `music` in a real terminal (not inside Claude Code — TUI requires a T
 
 | Key | Action |
 |-----|--------|
-| `↑`/`↓` | Navigate the track pane (instant, no poll) |
+| `↑`/`↓` | Navigate the track pane (or control rows, when the grid is focused) |
 | `PgUp`/`PgDn`/`Home`/`End` | Page and jump in long lists |
-| `Enter` | Play selected track |
-| `←`/`→` | Seek ±30s |
+| `Enter` | Play selected track (or cycle the focused control's value) |
+| `←` / `→` | Focus the control grid / return to the Up Next list |
+| `[` / `]` | Seek ±30s |
+| `s` / `m` | Shuffle on/off / cycle order (Songs → Albums → Groupings) |
+| `r` / `g` | Cycle repeat (Off → All → One) / Genius Shuffle |
 | `l` | Favorite the current track |
 | `n` | Next-up options (shuffle / playlist / quiet) |
 | `Esc` | Back / dismiss menu |
 
-Two markers in the track pane: green `▶` = currently playing, inverse video = cursor position.
+Under the track progress is a **control grid** (Shuffle / Order / Repeat / Genius) showing each value live with the active one lit — press `←` to focus it, `↑↓` to move rows, `Enter` to cycle. Two markers in the track pane: green `▶` = currently playing, inverse video = cursor position. Genius Shuffle's queue isn't readable via Apple's scripting, so while it's active the Up Next reads "Genius Shuffle Active" rather than a (wrong) track list.
 
 ![Now Playing](media/nowplaying.png)
 
@@ -318,7 +321,7 @@ Two markers in the track pane: green `▶` = currently playing, inverse video = 
 
 ![Playlist Browser](media/playlist.jpg)
 
-**Speakers tab** — `↑↓` select, `Enter` toggles AirPlay outputs on/off, `←→` adjusts per-speaker volume. Active speakers show volume bars. (The `music speaker` CLI drives speakers non-interactively.)
+**Speakers tab** — `↑↓` select, `Enter` toggles AirPlay outputs on/off, `←→` adjusts per-speaker volume. Active speakers show volume bars. Below the outputs: an **EQ block** (power row + preset picker — `Enter` toggles/expands, `e` toggles from anywhere) and a **Visualizer** row (`Enter` or `v` toggles Music's on-screen visuals). (The `music speaker`, `music eq`, and `music visualizer` CLIs drive these non-interactively.)
 
 ![Speaker Picker](media/speakers.png)
 
