@@ -52,5 +52,8 @@ func visualizerStatus(_ backend: AppleScriptBackend) throws -> Bool {
 func visualizerSetEnabled(_ backend: AppleScriptBackend, _ on: Bool) throws {
     let current = (try? visualizerStatus(backend)) ?? false
     guard current != on else { return }
+    // Turning on: close the Equalizer window first — otherwise it surfaces over
+    // the visualizer and steals focus when Music comes forward.
+    if on { closeEqualizerWindowIfOpen(backend) }
     _ = try visualizerUIRun(backend, "click \(visualizerMenuItem)")
 }

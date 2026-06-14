@@ -169,6 +169,21 @@ func fetchEQBands(_ backend: AppleScriptBackend, name: String) throws -> [Double
         .components(separatedBy: ",").compactMap(Double.init)
 }
 
+/// Close the Equalizer window if it's open (its close button — the Window-menu
+/// item only opens/focuses, it doesn't toggle shut). Used before starting the
+/// visualizer so the EQ panel doesn't surface over it and steal focus.
+func closeEqualizerWindowIfOpen(_ backend: AppleScriptBackend) {
+    _ = try? runMusicUIScript(backend, """
+        tell application "System Events"
+            tell process "Music"
+                if exists window "Equalizer" then
+                    click button 1 of window "Equalizer"
+                end if
+            end tell
+        end tell
+        """)
+}
+
 func eqSetEnabled(_ backend: AppleScriptBackend, _ on: Bool) throws {
     _ = try eqUIRun(backend, """
         set cbv to value of checkbox 1
