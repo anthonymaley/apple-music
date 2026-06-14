@@ -27,9 +27,9 @@ final class NowPlayingScene: Scene {
     let id: SceneID = .nowPlaying
     let tabTitle = "Now"
     var footerHint: String {
-        controlFocus
-            ? "\u{2191}\u{2193}\u{2190}\u{2192} Move cell  Enter Set  Esc Done  \u{2014} control grid"
-            : "\u{2191}\u{2193} Browse  \u{2190}\u{2192} Seek  l \u{2665}  c Controls  s/m Shuffle  r Repeat  g Genius"
+        gridFocused
+            ? "\u{2191}\u{2193} Row  Enter Set  \u{2192} Up Next  [ ] Seek  \u{2014} controls"
+            : "\u{2191}\u{2193} Browse  \u{2190} Controls  Enter Jump  [ ] Seek  l \u{2665}"
     }
 
     private let backend: AppleScriptBackend
@@ -59,11 +59,11 @@ final class NowPlayingScene: Scene {
     private var lastModesMutation = Date.distantPast
     private var lastModesKick = Date.distantPast
 
-    // Control grid: `c` moves focus into it; then ↑↓←→ move the cell cursor and
-    // Enter sets the value. Unfocused, the grid still shows live active state.
-    private var controlFocus = false
+    // Control grid: ← focuses it (it's the left pane), → returns to the Up Next
+    // list. ↑↓ move the row cursor, Enter cycles that row's value. Unfocused,
+    // the grid still shows live active state.
+    private var gridFocused = false
     private var gridRow = 0
-    private var gridCol = 0
 
     // Genius Shuffle latch: set when we trigger it, cleared once a real playlist
     // or app queue takes over (Music exposes no genius flag — see geniusShouldClear).
@@ -255,32 +255,31 @@ final class NowPlayingScene: Scene {
     }
 
     /// The playback-control grid: a label column then option cells per row.
-    /// Active value is bright; the focused cell (when `controlFocus`) is inverse.
+    /// Active value is bright; the focused row (when the grid has focus) is
+    /// marked with ▸ and Enter cycles its value.
     private func renderControlGrid(startY: Int, x: Int, bottom: Int) -> String {
         var out = ""
         var y = startY
         let labelW = 8
         for row in 0..<ControlGrid.rowCount {
             guard y <= bottom else { break }
+            let rowFocused = gridFocused && row == gridRow
             out += ANSICode.moveTo(row: y, col: x)
+            let marker = rowFocused ? "\(ANSICode.cyan)\u{25B8}\(ANSICode.reset)" : " "
             let label = ControlGrid.labels[row]
             let padLabel = label + String(repeating: " ", count: max(0, labelW - label.count))
-            out += "\(ANSICode.dim)\(padLabel)\(ANSICode.reset) "
+            let labelStyled = rowFocused ? "\(ANSICode.brightWhite)\(padLabel)\(ANSICode.reset)"
+                                         : "\(ANSICode.dim)\(padLabel)\(ANSICode.reset)"
+            out += "\(marker) \(labelStyled) "
             let active = modes.flatMap { ControlGrid.activeColumn(row: row, modes: $0) }
             var line = ""
             for col in 0..<ControlGrid.cellCount(row: row) {
                 let cell = ControlGrid.cells[row][col]
-                let isActive = (col == active)
-                let isCursor = controlFocus && row == gridRow && col == gridCol
-                let styled: String
-                if isCursor {
-                    styled = "\(ANSICode.inverse)\(ANSICode.bold) \(cell) \(ANSICode.reset)"
-                } else if isActive {
-                    styled = "\(ANSICode.brightWhite)[\(cell)]\(ANSICode.reset)"
+                if col == active {
+                    line += "\(ANSICode.brightWhite)[\(cell)]\(ANSICode.reset) "
                 } else {
-                    styled = "\(ANSICode.dim) \(cell) \(ANSICode.reset)"
+                    line += "\(ANSICode.dim) \(cell) \(ANSICode.reset) "
                 }
-                line += styled + " "
             }
             // `line` carries ANSI codes, so it isn't truncText'd (that counts
             // escape bytes); the rows are short and fit the metadata column.
@@ -320,29 +319,6 @@ final class NowPlayingScene: Scene {
             ly += 1
         }
         return out
-    }
-
-    /// Apply the focused control-grid cell: set the value (optimistically) and
-    /// run the AppleScript write. Maps the (row, col) cursor to the action.
-    private func applyControlCell() {
-        lastModesMutation = Date()
-        switch ControlRow(rawValue: gridRow) {
-        case .shuffle:
-            let on = gridCol == 0
-            modes?.shuffleEnabled = on
-            actions.run("Shuffle") { try require((try? setShuffleEnabled(self.backend, on)) != nil, "Couldn't set shuffle.") }
-        case .order:
-            let mode = ControlGrid.orderModes[gridCol]
-            modes?.shuffleMode = mode
-            actions.run("Shuffle mode") { try require((try? setShuffleMode(self.backend, mode)) != nil, "Couldn't set shuffle mode.") }
-        case .repeatMode:
-            let rep = ControlGrid.repeatModes[gridCol]
-            modes?.songRepeat = rep
-            actions.run("Repeat") { try require((try? setSongRepeat(self.backend, rep)) != nil, "Couldn't set repeat.") }
-        case .genius, .none:
-            geniusActive = true; geniusTriggeredAt = Date()
-            actions.run("Genius") { try require((try? triggerGeniusShuffle(self.backend)) != nil, "Genius Shuffle failed.") }
-        }
     }
 
     private func act(on action: ContinuationAction) {
@@ -395,39 +371,46 @@ final class NowPlayingScene: Scene {
             manualMenu = true; return .redraw
         }
 
-        // `c` toggles focus into the control grid (not while the queue-end menu owns input).
-        if case .char("c") = key, !menuShownLastFrame {
-            controlFocus.toggle()
-            if controlFocus { (gridRow, gridCol) = ControlGrid.clamp(row: gridRow, col: gridCol) }
+        // Focus model: ← focuses the control grid (left pane), → the Up Next
+        // list (right). ↑↓/Enter then act on whichever has focus. Seek lives on
+        // [ ] so the arrows are free for navigation.
+        switch key {
+        case .left:  gridFocused = true; return .redraw
+        case .right: gridFocused = false; return .redraw
+        case .char("["):
+            actions.run("Seek") { _ = try syncRun { try await self.backend.runMusic("set player position to (player position - 30)") } }
             return .redraw
+        case .char("]"):
+            actions.run("Seek") { _ = try syncRun { try await self.backend.runMusic("set player position to (player position + 30)") } }
+            return .redraw
+        default:
+            break
         }
-        // While the grid is focused, arrows move the cell cursor, Enter sets the
-        // value, Esc returns focus to the Up Next list. The s/m/r/g shortcuts
-        // below still work in either mode.
-        if controlFocus, !menuShownLastFrame {
+
+        // Grid-focused: ↑↓ move the row cursor, Enter cycles its value.
+        if gridFocused {
             switch key {
-            case .up:    (gridRow, gridCol) = ControlGrid.clamp(row: gridRow - 1, col: gridCol); return .redraw
-            case .down:  (gridRow, gridCol) = ControlGrid.clamp(row: gridRow + 1, col: gridCol); return .redraw
-            case .left:  (gridRow, gridCol) = ControlGrid.clamp(row: gridRow, col: gridCol - 1); return .redraw
-            case .right: (gridRow, gridCol) = ControlGrid.clamp(row: gridRow, col: gridCol + 1); return .redraw
-            case .enter: applyControlCell(); return .redraw
-            case .escape: controlFocus = false; return .redraw
-            default: break   // fall through: s/m/r/g/l still work
+            case .up:    gridRow = max(0, gridRow - 1); return .redraw
+            case .down:  gridRow = min(ControlGrid.rowCount - 1, gridRow + 1); return .redraw
+            case .home:  gridRow = 0; return .redraw
+            case .end:   gridRow = ControlGrid.rowCount - 1; return .redraw
+            case .enter: applyControlRow(); return .redraw
+            default: break   // s/m/r/g/l fall through below
             }
         }
 
         switch key {
         case .up:
-            guard !rows.isEmpty else { return .none }
+            guard !gridFocused, !rows.isEmpty else { return .none }
             cursor = max(0, cursor - 1); return .redraw
         case .down:
-            guard !rows.isEmpty else { return .none }
+            guard !gridFocused, !rows.isEmpty else { return .none }
             cursor = min(max(0, rows.count - 1), cursor + 1); return .redraw
         case .pageUp:
-            guard !rows.isEmpty else { return .none }
+            guard !gridFocused, !rows.isEmpty else { return .none }
             cursor = max(0, cursor - 10); return .redraw
         case .pageDown:
-            guard !rows.isEmpty else { return .none }
+            guard !gridFocused, !rows.isEmpty else { return .none }
             cursor = min(max(0, rows.count - 1), cursor + 10); return .redraw
         case .home:
             guard !rows.isEmpty else { return .none }
@@ -489,47 +472,63 @@ final class NowPlayingScene: Scene {
                 status.post(parts.first == "ON" ? "\u{2665} Favorited '\(title)'" : "Unfavorited '\(title)'")
             }
             return .redraw
-        case .left:
-            actions.run("Seek") { _ = try syncRun { try await self.backend.runMusic("set player position to (player position - 30)") } }
-            return .redraw
-        case .right:
-            actions.run("Seek") { _ = try syncRun { try await self.backend.runMusic("set player position to (player position + 30)") } }
-            return .redraw
         case .char("s"), .char("S"):
-            // Shuffle on/off (Music's `shuffle enabled` flag). Distinct from the
-            // global `z`, which shuffle-plays the current context.
-            let on = !(modes?.shuffleEnabled ?? false)
-            modes?.shuffleEnabled = on
-            lastModesMutation = Date()
-            actions.run("Shuffle") {
-                try require((try? setShuffleEnabled(self.backend, on)) != nil, "Couldn't set shuffle.")
-            }
-            return .redraw
+            toggleShuffle(); return .redraw
         case .char("m"), .char("M"):
-            let next = (modes?.shuffleMode ?? .songs).next
-            modes?.shuffleMode = next
-            lastModesMutation = Date()
-            actions.run("Shuffle mode") {
-                try require((try? setShuffleMode(self.backend, next)) != nil, "Couldn't set shuffle mode.")
-            }
-            return .redraw
+            cycleShuffleMode(); return .redraw
         case .char("r"), .char("R"):
-            let next = (modes?.songRepeat ?? .off).next
-            modes?.songRepeat = next
-            lastModesMutation = Date()
-            actions.run("Repeat") {
-                try require((try? setSongRepeat(self.backend, next)) != nil, "Couldn't set repeat.")
-            }
-            return .redraw
+            cycleRepeat(); return .redraw
         case .char("g"), .char("G"):
-            // Genius Shuffle rebuilds the queue from the current song (UI-scripted).
-            geniusActive = true; geniusTriggeredAt = Date()
-            actions.run("Genius") {
-                try require((try? triggerGeniusShuffle(self.backend)) != nil, "Genius Shuffle failed.")
-            }
-            return .redraw
+            triggerGenius(); return .redraw
         default:
             return .none
+        }
+    }
+
+    // MARK: Playback-mode mutators (shared by the s/m/r/g keys and the grid).
+    // Each updates `modes` optimistically and writes via the action queue.
+
+    /// Shuffle on/off (Music's `shuffle enabled`). Distinct from the global `z`,
+    /// which shuffle-plays the current context.
+    private func toggleShuffle() {
+        let on = !(modes?.shuffleEnabled ?? false)
+        modes?.shuffleEnabled = on
+        lastModesMutation = Date()
+        actions.run("Shuffle") {
+            try require((try? setShuffleEnabled(self.backend, on)) != nil, "Couldn't set shuffle.")
+        }
+    }
+    private func cycleShuffleMode() {
+        let next = (modes?.shuffleMode ?? .songs).next
+        modes?.shuffleMode = next
+        lastModesMutation = Date()
+        actions.run("Shuffle mode") {
+            try require((try? setShuffleMode(self.backend, next)) != nil, "Couldn't set shuffle mode.")
+        }
+    }
+    private func cycleRepeat() {
+        let next = (modes?.songRepeat ?? .off).next
+        modes?.songRepeat = next
+        lastModesMutation = Date()
+        actions.run("Repeat") {
+            try require((try? setSongRepeat(self.backend, next)) != nil, "Couldn't set repeat.")
+        }
+    }
+    /// Genius Shuffle rebuilds the queue from the current song (UI-scripted).
+    private func triggerGenius() {
+        geniusActive = true; geniusTriggeredAt = Date()
+        actions.run("Genius") {
+            try require((try? triggerGeniusShuffle(self.backend)) != nil, "Genius Shuffle failed.")
+        }
+    }
+
+    /// Enter on the focused control row cycles its value (same as the shortcut keys).
+    private func applyControlRow() {
+        switch ControlRow(rawValue: gridRow) {
+        case .shuffle:    toggleShuffle()
+        case .order:      cycleShuffleMode()
+        case .repeatMode: cycleRepeat()
+        case .genius, .none: triggerGenius()
         }
     }
 }

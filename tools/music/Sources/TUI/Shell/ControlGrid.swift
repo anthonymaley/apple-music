@@ -33,11 +33,4 @@ enum ControlGrid {
         }
     }
 
-    /// Clamp a (row, col) to valid bounds — col clamps to the new row's width,
-    /// so moving up/down onto a narrower row keeps the cursor in range.
-    static func clamp(row: Int, col: Int) -> (row: Int, col: Int) {
-        let r = min(max(0, row), rowCount - 1)
-        let c = min(max(0, col), cellCount(row: r) - 1)
-        return (r, c)
-    }
 }

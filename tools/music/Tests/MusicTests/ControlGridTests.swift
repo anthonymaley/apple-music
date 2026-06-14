@@ -23,13 +23,4 @@ final class ControlGridTests: XCTestCase {
         XCTAssertEqual(ControlGrid.activeColumn(row: 2, modes: m2), 2) // One
     }
 
-    func testClampKeepsCursorInRow() {
-        // Moving onto a narrower row clamps the column.
-        XCTAssertEqual(ControlGrid.clamp(row: 0, col: 2).col, 1)  // Shuffle has 2 cells
-        XCTAssertEqual(ControlGrid.clamp(row: 3, col: 2).col, 0)  // Genius has 1 cell
-        XCTAssertEqual(ControlGrid.clamp(row: 1, col: 2).col, 2)  // Order keeps col 2
-        // Bounds.
-        XCTAssertEqual(ControlGrid.clamp(row: -1, col: -1).row, 0)
-        XCTAssertEqual(ControlGrid.clamp(row: 99, col: 0).row, 3)
-    }
 }
