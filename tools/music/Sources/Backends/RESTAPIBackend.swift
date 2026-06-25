@@ -26,7 +26,8 @@ struct RESTAPIBackend {
             request.setValue(userToken, forHTTPHeaderField: "Music-User-Token")
         }
         let (data, response) = try await URLSession.shared.data(for: request)
-        return (data, (response as! HTTPURLResponse).statusCode)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        return (data, http.statusCode)
     }
 
     func post(_ path: String, body: Data? = nil) async throws -> (Data, Int) {
@@ -42,7 +43,8 @@ struct RESTAPIBackend {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await URLSession.shared.data(for: request)
-        return (data, (response as! HTTPURLResponse).statusCode)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        return (data, http.statusCode)
     }
 
     // MARK: - Catalog Search
@@ -195,11 +197,13 @@ func playlistCreationRequestBody(name: String, songIDs: [String]) -> [String: An
 enum APIError: Error, LocalizedError {
     case requestFailed(Int)
     case noData
+    case invalidResponse
 
     var errorDescription: String? {
         switch self {
         case .requestFailed(let code): return "API request failed with status \(code)"
         case .noData: return "API response did not include data"
+        case .invalidResponse: return "API returned a non-HTTP response"
         }
     }
 }

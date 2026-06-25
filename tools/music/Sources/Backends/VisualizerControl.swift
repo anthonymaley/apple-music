@@ -50,7 +50,10 @@ func visualizerStatus(_ backend: AppleScriptBackend) throws -> Bool {
 
 /// Idempotent: clicks the menu item only when the current state differs.
 func visualizerSetEnabled(_ backend: AppleScriptBackend, _ on: Bool) throws {
-    let current = (try? visualizerStatus(backend)) ?? false
+    // Read the real state rather than defaulting to false — a swallowed read
+    // could otherwise flip the visualizer the wrong way (ask "on" while it is
+    // already on → toggles off). A failed read surfaces to the caller.
+    let current = try visualizerStatus(backend)
     guard current != on else { return }
     // Turning on: close the Equalizer window first — otherwise it surfaces over
     // the visualizer and steals focus when Music comes forward.

@@ -251,6 +251,8 @@ music play --playlist "Working Vibes" -v     # see AppleScript calls
 music speaker smart --verbose list --json    # verbose on stderr, JSON on stdout
 ```
 
+Failures surface on **stderr** by default — a failed AirPlay route, a now-playing read error, or a malformed config prints a `✗`/`⚠` line, and `--json` mode emits an error object rather than corrupting the stream — so stdout stays clean for piping.
+
 ### JSON Output
 
 Every command supports `--json` for scripting and automation:

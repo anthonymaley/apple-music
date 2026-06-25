@@ -21,16 +21,22 @@ func libraryTrackLookupScript(title: String, artist: String) -> String {
 /// Returns false when the script failed or no library track matched.
 @discardableResult
 func duplicateLibraryTrack(backend: AppleScriptBackend, title: String, artist: String, toPlaylist playlist: String) -> Bool {
-    guard let result = try? syncRun({
-        try await backend.runMusic("""
-            \(libraryTrackLookupScript(title: title, artist: artist))
-            if (count of results) > 0 then
-                duplicate item 1 of results to playlist "\(escapeAppleScriptString(playlist))"
-                return "OK"
-            end if
-            return "NOT_FOUND"
-        """)
-    }) else { return false }
+    let result: String
+    do {
+        result = try syncRun({
+            try await backend.runMusic("""
+                \(libraryTrackLookupScript(title: title, artist: artist))
+                if (count of results) > 0 then
+                    duplicate item 1 of results to playlist "\(escapeAppleScriptString(playlist))"
+                    return "OK"
+                end if
+                return "NOT_FOUND"
+            """)
+        })
+    } catch {
+        errorOut("✗ Couldn't add to '\(playlist)' via library: \(error.localizedDescription)")
+        return false
+    }
     return result.trimmingCharacters(in: .whitespacesAndNewlines) == "OK"
 }
 

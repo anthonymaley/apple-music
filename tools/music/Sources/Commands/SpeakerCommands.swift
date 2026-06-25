@@ -171,17 +171,29 @@ private func runSpeakerTUI() throws {
     }
 
     let backend = AppleScriptBackend()
+    // Collect failures and surface them after the picker closes — writing to
+    // stderr mid-render would corrupt the live list. Previously `_ = try?` made
+    // a failed AirPlay route/volume write invisible (the row still flipped).
+    var actionErrors: [String] = []
     let result = runMultiSelectList(title: "AirPlay Speakers", items: &items, onToggle: { idx, selected in
         let name = devices[idx]["name"] as! String
-        _ = try? syncRun {
-            try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(name))\" to \(selected)")
+        do {
+            _ = try syncRun {
+                try await backend.runMusic("set selected of AirPlay device \"\(escapeAppleScriptString(name))\" to \(selected)")
+            }
+        } catch {
+            actionErrors.append("Couldn't \(selected ? "add" : "remove") \(name): \(error.localizedDescription)")
         }
     }, onAdjust: { idx, delta in
         volumes[idx] = min(100, max(0, volumes[idx] + delta))
         let name = devices[idx]["name"] as! String
         let vol = volumes[idx]
-        _ = try? syncRun {
-            try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(name))\" to \(vol)")
+        do {
+            _ = try syncRun {
+                try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(name))\" to \(vol)")
+            }
+        } catch {
+            actionErrors.append("Couldn't set \(name) volume: \(error.localizedDescription)")
         }
         return "vol: \(vol)"
     })
@@ -203,6 +215,10 @@ private func runSpeakerTUI() throws {
         try? cache.writeSpeakers(speakerResults)
     default:
         break
+    }
+
+    for message in actionErrors {
+        errorOut("✗ \(message)")
     }
 }
 
@@ -281,6 +297,7 @@ struct SpeakerSnapshot {
 @discardableResult
 func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
     guard let devices = try? fetchSpeakerDevices() else {
+        errorOut("✗ Couldn't enumerate AirPlay speakers to reset.")
         verbose("reset: fetchSpeakerDevices failed, skipping")
         return []
     }
@@ -340,10 +357,13 @@ func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
 
     // Verify the group actually came back — don't claim success for a speaker
     // whose reselect silently failed.
-    let after = (try? fetchSpeakerDevices()) ?? []
-    let selectedNow = Set(after.filter { $0["selected"] as? Bool == true }.compactMap { $0["name"] as? String })
+    let after = try? fetchSpeakerDevices()
+    if after == nil {
+        errorOut("✗ Couldn't verify AirPlay reset (re-enumeration failed); speakers may not have reconnected.")
+    }
+    let selectedNow = Set((after ?? []).filter { $0["selected"] as? Bool == true }.compactMap { $0["name"] as? String })
     let outcomes = speakers.map {
-        SpeakerSnapshot(name: $0.name, volume: $0.volume, reselected: after.isEmpty || selectedNow.contains($0.name))
+        SpeakerSnapshot(name: $0.name, volume: $0.volume, reselected: after == nil || selectedNow.contains($0.name))
     }
     verbose("reset complete: \(outcomes.map { "\($0.name)\($0.reselected ? "" : " (LOST)")" }.joined(separator: ", "))")
     return outcomes

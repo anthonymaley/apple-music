@@ -72,4 +72,24 @@ final class ResultCacheTests: XCTestCase {
             XCTAssertTrue(error is CacheError)
         }
     }
+
+    // Batch lookup must separate hits from misses so the caller can report the
+    // dropped indices instead of silently building a shorter result.
+    func testLookupSongsPartitionsHitsAndDrops() throws {
+        let cache = ResultCache(directory: testDir.path)
+        try cache.writeSongs([
+            SongResult(index: 1, title: "Alpha", artist: "A", album: "AA", catalogId: "id1"),
+            SongResult(index: 2, title: "Beta", artist: "B", album: "BB", catalogId: "id2"),
+        ])
+        let (resolved, dropped) = cache.lookupSongs(indices: [2, 9])
+        XCTAssertEqual(resolved.map { $0.index }, [2])
+        XCTAssertEqual(dropped, [9])
+    }
+
+    func testLookupSongsAllDroppedWhenCacheMissing() {
+        let cache = ResultCache(directory: testDir.path)
+        let (resolved, dropped) = cache.lookupSongs(indices: [1, 2])
+        XCTAssertTrue(resolved.isEmpty)
+        XCTAssertEqual(dropped, [1, 2])
+    }
 }

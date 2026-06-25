@@ -24,8 +24,12 @@ struct Remove: ParsableCommand {
 
         func deleteTrack(from playlist: String) throws -> Bool {
             let escapedPlaylist = escapeAppleScriptString(playlist)
-            let check = try? syncRun {
+            // Guard the missing-playlist case in-script so it returns NOT_FOUND
+            // cleanly; any *thrown* error is then a real failure (permission,
+            // Music not running) worth surfacing — not a silent "not found".
+            let check = try syncRun {
                 try await backend.runMusic("""
+                    if not (exists playlist "\(escapedPlaylist)") then return "NOT_FOUND"
                     set matches to (every track of playlist "\(escapedPlaylist)" whose name is "\(escapedTitle)" and artist is "\(escapedArtist)")
                     if (count of matches) = 0 then
                         set matches to (every track of playlist "\(escapedPlaylist)" whose name contains "\(escapedTitle)" and artist contains "\(escapedArtist)")
@@ -38,7 +42,7 @@ struct Remove: ParsableCommand {
                     end if
                 """)
             }
-            return check?.trimmingCharacters(in: .whitespacesAndNewlines) == "DELETED"
+            return check.trimmingCharacters(in: .whitespacesAndNewlines) == "DELETED"
         }
 
         // One output path so --json is honored everywhere (the flag used to be
@@ -80,8 +84,10 @@ struct Remove: ParsableCommand {
                 .map { $0.trimmingCharacters(in: .whitespaces) }
             var removedFrom: [String] = []
             for pl in names {
-                if (try? deleteTrack(from: pl)) == true {
-                    removedFrom.append(pl)
+                do {
+                    if try deleteTrack(from: pl) { removedFrom.append(pl) }
+                } catch {
+                    errorOut("⚠ Couldn't remove from '\(pl)': \(error.localizedDescription)")
                 }
             }
             report(removedFrom: removedFrom)

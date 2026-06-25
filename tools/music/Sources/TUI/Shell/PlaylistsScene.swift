@@ -349,7 +349,8 @@ final class PlaylistsScene: Scene {
         let esc = escapeAppleScriptString(playlists[plCursor])
         let name = playlists[plCursor]
         actions.run("Play") {
-            _ = try? syncRun { try await self.backend.runMusic("set shuffle enabled to \(shuffle)") }
+            try require((try? syncRun { try await self.backend.runMusic("set shuffle enabled to \(shuffle)") }) != nil,
+                        "Couldn't set shuffle for '\(name)'.")
             try require((try? syncRun { try await self.backend.runMusic("play playlist \"\(esc)\"") }) != nil,
                         "Couldn't play '\(name)'.")
         }

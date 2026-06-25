@@ -64,6 +64,24 @@ struct ResultCache {
         return song
     }
 
+    /// Resolve multiple cached indices at once, separating hits from misses
+    /// (missing cache or out-of-range index) so the caller can report the
+    /// dropped indices instead of silently building a shorter result. Reads the
+    /// cache once.
+    func lookupSongs(indices: [Int]) -> (resolved: [SongResult], dropped: [Int]) {
+        let songs = (try? readSongs()) ?? []
+        var resolved: [SongResult] = []
+        var dropped: [Int] = []
+        for index in indices {
+            if let song = songs.first(where: { $0.index == index }) {
+                resolved.append(song)
+            } else {
+                dropped.append(index)
+            }
+        }
+        return (resolved, dropped)
+    }
+
     func writeSpeakers(_ speakers: [SpeakerResult]) throws {
         let data = try JSONEncoder().encode(speakers)
         try ensureDirectory()

@@ -9,6 +9,13 @@ func verbose(_ message: String) {
     FileHandle.standardError.write(Data("[verbose] \(message)\n".utf8))
 }
 
+/// Print an error line to stderr unconditionally (not gated on verbose/TTY/JSON).
+/// The CLI's channel for failures that would otherwise be swallowed by `try?` —
+/// keeps stdout (and `--json` output) clean while still surfacing the failure.
+func errorOut(_ message: String) {
+    FileHandle.standardError.write(Data("\(message)\n".utf8))
+}
+
 /// Show a transient status message on stderr during a long operation.
 /// - Prints only when stdout is a TTY and not in JSON mode.
 /// - Clears the line on completion (success or failure).

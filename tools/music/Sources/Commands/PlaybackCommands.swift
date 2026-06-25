@@ -123,7 +123,17 @@ struct Play: ParsableCommand {
             }
 
             // Parse query / speakers / volume / shuffle (see PlayParser).
-            let deviceNames = (try? fetchSpeakerDevices())?.compactMap { $0["name"] as? String } ?? []
+            // A *failed* enumeration (vs. legitimately no devices) means named
+            // speakers in the args won't be recognized and would silently fall
+            // into the query — surface that the routing is degraded this run.
+            let deviceNames: [String]
+            do {
+                deviceNames = try fetchSpeakerDevices().compactMap { $0["name"] as? String }
+            } catch {
+                deviceNames = []
+                errorOut("⚠ Couldn't read AirPlay speakers; named-speaker routing is unavailable this run.")
+                verbose("fetchSpeakerDevices failed: \(error.localizedDescription)")
+            }
             let parsed = PlayParser.parse(args, deviceNames: deviceNames)
             let playlistName = parsed.queryArgs.joined(separator: " ")
             if !parsed.speakers.isEmpty {
@@ -259,9 +269,19 @@ func addCatalogSongAndPlay(
     artist: String?
 ) throws -> Bool {
     let auth = AuthManager()
-    guard let devToken = try? auth.requireDeveloperToken(),
-          let userToken = try? auth.requireUserToken() else {
+    let devToken: String
+    let userToken: String
+    do {
+        devToken = try auth.requireDeveloperToken()
+        userToken = try auth.requireUserToken()
+    } catch AuthError.configNotFound, AuthError.userTokenRequired {
+        // Genuinely not set up — the catalog path simply doesn't apply.
         verbose("catalog fallback unavailable: MusicKit auth is not configured")
+        return false
+    } catch {
+        // Auth IS set up but broken (corrupt config / expired token / key) —
+        // surface it so the user isn't told the song doesn't exist.
+        errorOut("✗ Apple Music auth error: \(error.localizedDescription)")
         return false
     }
 
@@ -289,9 +309,16 @@ func addCatalogSongAndPlay(
 
 func addCatalogSongIDAndPlay(backend: AppleScriptBackend, id: String) throws -> Bool {
     let auth = AuthManager()
-    guard let devToken = try? auth.requireDeveloperToken(),
-          let userToken = try? auth.requireUserToken() else {
+    let devToken: String
+    let userToken: String
+    do {
+        devToken = try auth.requireDeveloperToken()
+        userToken = try auth.requireUserToken()
+    } catch AuthError.configNotFound, AuthError.userTokenRequired {
         verbose("catalog URL playback unavailable: MusicKit auth is not configured")
+        return false
+    } catch {
+        errorOut("✗ Apple Music auth error: \(error.localizedDescription)")
         return false
     }
 
@@ -384,7 +411,9 @@ func showNowPlaying(json: Bool = false, waitForPlay: Bool = false) {
     // known-slow AirPlay probe by up to 10 after every playback command. The
     // bulk `whose selected is true` reads are 2 Apple Events instead of 3 per
     // device (the per-list repeat below is local, no Apple Events).
-    guard let result = try? syncRun({
+    let result: String
+    do {
+        result = try syncRun({
         try await backend.runMusic("""
             set info to ""
             repeat 10 times
@@ -413,7 +442,15 @@ func showNowPlaying(json: Bool = false, waitForPlay: Bool = false) {
             end try
             return info & "|" & spk
         """)
-    }) else { return }
+        })
+    } catch {
+        if json {
+            print(#"{"error": "could not read now playing"}"#)
+        } else {
+            errorOut("✗ Couldn't read now playing: \(error.localizedDescription)")
+        }
+        return
+    }
 
     let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed == "STOPPED" {

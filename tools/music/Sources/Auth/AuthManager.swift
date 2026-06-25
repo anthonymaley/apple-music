@@ -20,6 +20,19 @@ struct AuthManager {
         return config
     }
 
+    /// Like `loadConfig`, but distinguishes a malformed config (throws
+    /// `.configCorrupt`) from a genuinely absent one (returns nil). The require*
+    /// paths use this so a broken config is reported as broken, not as
+    /// "not configured". `path` is injectable for testing.
+    func loadConfigStrict(path: String = AuthManager.configPath) throws -> AuthConfig? {
+        guard let data = FileManager.default.contents(atPath: path) else { return nil }
+        do {
+            return try JSONDecoder().decode(AuthConfig.self, from: data)
+        } catch {
+            throw AuthError.configCorrupt("\(error)")
+        }
+    }
+
     func saveConfig(_ config: AuthConfig) throws {
         try FileManager.default.createDirectory(atPath: Self.configDir, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(config)
@@ -27,7 +40,7 @@ struct AuthManager {
     }
 
     func developerToken() throws -> String {
-        guard let config = loadConfig() else { throw AuthError.configNotFound }
+        guard let config = try loadConfigStrict() else { throw AuthError.configNotFound }
         let keyFullPath = NSString(string: config.keyPath).expandingTildeInPath
         let generator = JWTGenerator(keyID: config.keyId, teamID: config.teamId, keyPath: keyFullPath)
         return try generator.generate()
@@ -46,7 +59,7 @@ struct AuthManager {
     }
 
     func requireDeveloperToken() throws -> String {
-        guard loadConfig() != nil else {
+        guard try loadConfigStrict() != nil else {
             throw AuthError.configNotFound
         }
         return try developerToken()

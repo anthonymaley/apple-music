@@ -16,11 +16,17 @@ struct Vol: ParsableCommand {
                 var speakers: [MixerSpeaker] = active.map {
                     MixerSpeaker(name: $0["name"] as! String, volume: $0["volume"] as! Int)
                 }
+                var actionErrors: [String] = []
                 runVolumeMixer(speakers: &speakers) { name, volume in
-                    _ = try? syncRun {
-                        try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(name))\" to \(volume)")
+                    do {
+                        _ = try syncRun {
+                            try await backend.runMusic("set sound volume of AirPlay device \"\(escapeAppleScriptString(name))\" to \(volume)")
+                        }
+                    } catch {
+                        actionErrors.append("Couldn't set \(name) volume: \(error.localizedDescription)")
                     }
                 }
+                for message in actionErrors { errorOut("✗ \(message)") }
                 return
             }
 

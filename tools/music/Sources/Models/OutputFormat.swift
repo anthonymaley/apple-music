@@ -36,9 +36,13 @@ struct OutputFormat {
     }
 
     private func renderJSON(_ value: Any) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+        // isValidJSONObject must gate the call: JSONSerialization RAISES an ObjC
+        // exception (not a Swift error) on an invalid type like Date, which a
+        // `try?` cannot catch — so check first rather than crash.
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
               let str = String(data: data, encoding: .utf8) else {
-            return "{}"
+            return #"{"error": "could not serialize output to JSON"}"#
         }
         return str
     }

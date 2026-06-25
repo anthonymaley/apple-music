@@ -191,11 +191,14 @@ struct PlaylistCreate: ParsableCommand {
         // One API call creates the playlist and seeds the tracks — no
         // add-to-library detour, no sync sleep, no per-track AppleScript.
         let cache = ResultCache()
-        var songs: [SongResult] = []
-        for idx in indices {
-            if let song = try? cache.lookupSong(index: idx), !song.catalogId.isEmpty {
-                songs.append(song)
-            }
+        let (resolved, dropped) = cache.lookupSongs(indices: indices)
+        if !dropped.isEmpty {
+            errorOut("⚠ Skipped index(es) not in the last results: \(dropped.map(String.init).joined(separator: ", "))")
+        }
+        let songs = resolved.filter { !$0.catalogId.isEmpty }
+        let noCatalog = resolved.filter { $0.catalogId.isEmpty }.map(\.index)
+        if !noCatalog.isEmpty {
+            errorOut("⚠ Skipped track(s) with no catalog id: \(noCatalog.map(String.init).joined(separator: ", "))")
         }
         _ = try syncRun { try await api.createPlaylist(name: name, songIDs: songs.map(\.catalogId)) }
 
@@ -253,13 +256,14 @@ struct PlaylistAdd: ParsableCommand {
         let ints = items.compactMap { Int($0) }
         if ints.count == items.count && !ints.isEmpty {
             let cache = ResultCache()
-            var songs: [SongResult] = []
-            for idx in ints {
-                if let song = try? cache.lookupSong(index: idx) {
-                    songs.append(song)
-                }
+            let (songs, dropped) = cache.lookupSongs(indices: ints)
+            if !dropped.isEmpty {
+                errorOut("⚠ Skipped index(es) not in the last results: \(dropped.map(String.init).joined(separator: ", "))")
             }
-            guard !songs.isEmpty else { return }
+            guard !songs.isEmpty else {
+                errorOut("✗ No valid tracks to add.")
+                return
+            }
             try addSongs(songs.map { CatalogSong(id: $0.catalogId, title: $0.title, artist: $0.artist, album: $0.album) },
                          to: playlist, api: api, backend: backend)
             if json {

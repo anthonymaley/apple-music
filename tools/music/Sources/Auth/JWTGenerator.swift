@@ -45,6 +45,7 @@ struct JWTGenerator {
 enum AuthError: Error, LocalizedError {
     case invalidKeyData
     case configNotFound
+    case configCorrupt(String)
     case developerTokenFailed
     case userTokenRequired
     case userTokenExpired(Int)
@@ -53,6 +54,7 @@ enum AuthError: Error, LocalizedError {
         switch self {
         case .invalidKeyData: return "Invalid .p8 key data"
         case .configNotFound: return "Config not found at ~/.config/music/config.json — Run: music auth setup"
+        case .configCorrupt(let detail): return "Config at ~/.config/music/config.json is malformed: \(detail) — Run: music auth setup"
         case .developerTokenFailed: return "Failed to generate developer token"
         case .userTokenRequired: return "This command requires Apple Music authorization. Run: music auth"
         case .userTokenExpired(let status): return "User token expired or invalid (status \(status)). Run: music auth"

@@ -111,6 +111,8 @@ music remove                       # remove current song from current playlist
 music playlist list --json
 ```
 
+Errors go to **stderr** (and `--json` mode emits an error object rather than corrupting the stream), so stdout stays clean for piping; previously-silent failures — a failed AirPlay route, a malformed config, dropped playlist indices — now print a `✗`/`⚠` line.
+
 ## Architecture
 
 ```
