@@ -20,6 +20,14 @@ fi
 mkdir -p "$INSTALL_DIR"
 ln -sf "$BINARY" "$INSTALL_DIR/music"
 
+# Copy (don't symlink) the status line script to a stable, version-independent
+# path. The plugin cache dir is versioned (.../music/<version>/) and rotates on
+# every update; a copy here lets the Claude Code statusLine config point at one
+# fixed path that never breaks. The script only shells out to the `music` CLI,
+# so a plain copy has no dependency on the cache dir.
+cp "$SCRIPT_DIR/statusline.sh" "$INSTALL_DIR/music-statusline"
+chmod +x "$INSTALL_DIR/music-statusline"
+
 if ! echo "$PATH" | tr ':' '\n' | grep -q "^${INSTALL_DIR}$"; then
     echo ""
     echo "Add to your shell profile:"
@@ -33,3 +41,4 @@ else
     echo "✓ Built and symlinked to $INSTALL_DIR/music"
     echo "  Restart your shell or run: export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
+echo "✓ Status line: $INSTALL_DIR/music-statusline (point statusLine.command here)"

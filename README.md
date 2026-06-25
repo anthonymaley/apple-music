@@ -353,18 +353,18 @@ See what's playing at the bottom of Claude Code. Always visible, no token cost.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Add to `~/.claude/settings.json` (adjust the path to your plugin cache location):
+After running `scripts/install.sh`, add to `~/.claude/settings.json`:
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/plugins/cache/apple-music-marketplace/music/3.0.0/scripts/statusline.sh"
+    "command": "~/.local/bin/music-statusline"
   }
 }
 ```
 
-> The `2.0.0` segment is the installed plugin version — it changes every time the plugin updates. After `claude plugin update`, update this path to match (`ls ~/.claude/plugins/cache/apple-music-marketplace/music/` shows the current version).
+> `install.sh` copies the status line script to `~/.local/bin/music-statusline` — a stable path that survives `claude plugin update` (the plugin cache directory is versioned and changes on every update, so don't point at it directly). Configure this once.
 
 ## What Needs Auth?
 

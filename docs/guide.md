@@ -88,13 +88,13 @@ A passive display at the bottom of Claude Code showing what's playing — track,
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Enable in `~/.claude/settings.json`:
+Enable in `~/.claude/settings.json` (after running `scripts/install.sh`, which installs the script to a stable, update-proof path):
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/plugins/cache/apple-music-marketplace/music/3.0.0/scripts/statusline.sh"
+    "command": "~/.local/bin/music-statusline"
   }
 }
 ```
