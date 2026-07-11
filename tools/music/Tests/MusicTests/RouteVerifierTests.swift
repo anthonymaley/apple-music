@@ -108,6 +108,15 @@ final class RouteVerifierTests: XCTestCase {
         XCTAssertNotNil(verdict.advisory)
     }
 
+    func testSteadyStateNotVerifiedOnControlOnlyGhostFingerprint() throws {
+        // Constructed ghost shape: control handshakes complete (2× :7000) but
+        // no session/data connections — must NOT pass the fast path.
+        let v = verifier(snapshots: [[standing, newControl]])
+        let verdict = try v.steadyState(ip: "192.168.1.112")
+        XCTAssertFalse(verdict.verified)
+        XCTAssertNotNil(verdict.advisory)
+    }
+
     func testEstablishmentVerifiedOnLaterPoll() throws {
         // The retry loop itself is under test: empty deltas for the first two
         // polls; fresh connections only on the third.

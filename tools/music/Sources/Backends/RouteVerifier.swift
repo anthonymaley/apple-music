@@ -131,22 +131,26 @@ struct RouteVerifier {
             advisory: nil)
     }
 
-    /// Steady-state mode (the `speaker verify` verb): no baseline available,
-    /// so use the routed fingerprint — two :7000 control connections.
-    /// HomePod-verified; other device classes are an open question (spec §Open
+    /// Steady-state mode (the `speaker verify` verb and the fast path): no
+    /// baseline available, so use the routed fingerprint — two :7000 control
+    /// connections PLUS at least one data connection. Control-only patterns
+    /// are excluded: a ghost whose control handshake completed but whose
+    /// session never negotiated would show exactly that shape. HomePod-
+    /// verified; other device classes are an open question (spec §Open
     /// questions), so the failure advisory says what pattern was looked for.
     func steadyState(ip: String) throws -> RouteVerdict {
         let conns = try snapshot(ip: ip)
         let control = conns.filter { $0.remotePort == airplayControlPort }.count
-        if control >= 2 {
+        let data = conns.count - control
+        if control >= 2 && data >= 1 {
             return RouteVerdict(
                 verified: true,
-                evidence: "\(control) control connections + \(conns.count - control) other to \(ip)",
+                evidence: "\(control) control connections + \(data) other to \(ip)",
                 advisory: nil)
         }
         return RouteVerdict(
             verified: false,
-            evidence: "\(conns.count) connections to \(ip), \(control) on control port \(airplayControlPort)",
-            advisory: "verified fingerprint is ≥2 control connections (HomePod-verified pattern; lingering post-route connections do not count)")
+            evidence: "\(conns.count) connections to \(ip): \(control) control, \(data) data",
+            advisory: "verified fingerprint is ≥2 control connections plus ≥1 data connection (HomePod-verified pattern; lingering or control-only connections do not count)")
     }
 }

@@ -252,7 +252,9 @@ struct Play: ParsableCommand {
             if !parsed.speakers.isEmpty {
                 for line in verifyAndHealRoutes(speakers: parsed.speakers, backend: backend,
                                                 baselines: routeBaselines, ips: routeIPs) {
-                    print(line)
+                    // --json consumers parse stdout as one JSON document —
+                    // verdict lines go to stderr there (errorOut's channel).
+                    if json { errorOut(line) } else { print(line) }
                 }
             }
             showNowPlaying(json: json, waitForPlay: true)
