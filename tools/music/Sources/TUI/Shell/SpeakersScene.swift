@@ -6,6 +6,8 @@ struct SpeakerRow {
     let name: String
     var active: Bool
     var volume: Int
+    /// Device kind from AppleScript; "computer" is the Mac's own output.
+    var kind: String = ""
 }
 
 /// Pure mapping from `fetchSpeakerDevices()`'s `[[String:Any]]` to typed rows.
@@ -15,7 +17,8 @@ func speakerRows(from devices: [[String: Any]]) -> [SpeakerRow] {
         guard let name = d["name"] as? String,
               let active = d["selected"] as? Bool,
               let volume = d["volume"] as? Int else { return nil }
-        return SpeakerRow(name: name, active: active, volume: volume)
+        return SpeakerRow(name: name, active: active, volume: volume,
+                          kind: d["kind"] as? String ?? "")
     }
 }
 
@@ -402,8 +405,9 @@ final class SpeakersScene: Scene {
             // Verify additions only while playing — and pay the Bonjour
             // resolver cost only then (paused toggles defer to the play
             // path, same ordering as the speaker commands). Baseline BEFORE
-            // the write so establishment shows as churn.
-            let playing = active && playerIsPlaying(backend: self.backend)
+            // the write so establishment shows as churn. The computer row is
+            // local output — no AirPlay session exists to verify.
+            let playing = active && row.kind != "computer" && playerIsPlaying(backend: self.backend)
             let verifier = RouteVerifier()
             let ip = playing ? verifier.resolver.resolveIP(forSpeaker: name) : nil
             let baseline = ip.flatMap { try? verifier.snapshot(ip: $0) }

@@ -96,9 +96,18 @@ func verifyAndHealRoutes(speakers: [String], backend: AppleScriptBackend,
     var lines: [String] = []
     let devices = (try? fetchSpeakerDevices()) ?? []
     let computerName = devices.first { ($0["kind"] as? String) == "computer" }?["name"] as? String
+    let computerKind = Set(devices.filter { ($0["kind"] as? String) == "computer" }
+        .compactMap { $0["name"] as? String })
     let healer = RouteHealer(backend: backend, verifier: verifier)
 
     for speaker in speakers {
+        // The Mac's own output is local — there is no AirPlay session to
+        // verify or heal (live probe: verifying it burns both heal tiers and
+        // prints a false failure).
+        if computerKind.contains(speaker) {
+            lines.append("· \(speaker): local output — nothing to verify.")
+            continue
+        }
         guard let ip = ips[speaker], let baseline = baselines[speaker] else {
             lines.append("· \(speaker): could not resolve IP via Bonjour — routed but unverified.")
             continue
