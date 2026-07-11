@@ -107,4 +107,37 @@ final class RouteVerifierTests: XCTestCase {
         XCTAssertFalse(verdict.verified)
         XCTAssertNotNil(verdict.advisory)
     }
+
+    func testEstablishmentVerifiedOnLaterPoll() throws {
+        // The retry loop itself is under test: empty deltas for the first two
+        // polls; fresh connections only on the third.
+        let v = verifier(snapshots: [[standing], [standing], [standing], [standing, newControl, newData1]])
+        let baseline = try v.snapshot(ip: "192.168.1.112")
+        let verdict = try v.verifyEstablishment(ip: "192.168.1.112", baseline: baseline, timeout: 1)
+        XCTAssertTrue(verdict.verified)
+        XCTAssertTrue(verdict.evidence.contains("2 new connection"), verdict.evidence)
+    }
+
+    func testEstablishmentSurvivesTransientSnapshotError() throws {
+        let calls = LockedBox<Int>(0)
+        let v = RouteVerifier(
+            resolver: FixedResolver(),
+            connectionSource: {
+                let n = calls.get() + 1
+                calls.set(n)
+                if n == 2 { throw NetstatError(status: 1) }
+                return n < 4 ? [self.standing] : [self.standing, self.newControl, self.newData1]
+            },
+            pollInterval: 0)
+        let baseline = try v.snapshot(ip: "192.168.1.112")
+        let verdict = try v.verifyEstablishment(ip: "192.168.1.112", baseline: baseline, timeout: 1)
+        XCTAssertTrue(verdict.verified)
+    }
+
+    func testEstablishmentThrowsWhenEverySampleFails() {
+        let v = RouteVerifier(resolver: FixedResolver(),
+                              connectionSource: { throw NetstatError(status: 1) },
+                              pollInterval: 0)
+        XCTAssertThrowsError(try v.verifyEstablishment(ip: "192.168.1.112", baseline: [], timeout: 0.05))
+    }
 }

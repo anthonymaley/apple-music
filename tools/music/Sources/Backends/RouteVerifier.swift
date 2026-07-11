@@ -12,6 +12,8 @@ import Foundation
 /// connection plus fresh high-port data connections (HomePod-verified).
 let airplayControlPort = 7000
 
+// MARK: - Parsing (pure)
+
 struct TCPConnection: Hashable {
     let localPort: Int
     let remoteIP: String
@@ -40,6 +42,8 @@ func splitAddressPort(_ addr: String) -> (ip: String, port: Int)? {
     return (String(addr[..<lastDot]), port)
 }
 
+// MARK: - Live reader
+
 /// netstat failing must throw — silently returning an empty table would read
 /// as "no connections to the device", a false broken-route verdict.
 struct NetstatError: Error, LocalizedError {
@@ -66,6 +70,8 @@ func readEstablishedTCPConnections() throws -> [TCPConnection] {
     return parseNetstatTCP(String(data: data, encoding: .utf8) ?? "")
 }
 
+// MARK: - Verdicts
+
 struct RouteVerdict {
     let verified: Bool
     /// Human-readable network evidence ("3 new connections to 192.168.1.112 …").
@@ -74,10 +80,11 @@ struct RouteVerdict {
     let advisory: String?
 }
 
+/// Serial use per call site — one instance must not be shared across concurrent callers (connectionSource is not @Sendable).
 struct RouteVerifier {
     var resolver: SpeakerIPResolving = BonjourSpeakerResolver()
     var connectionSource: () throws -> [TCPConnection] = readEstablishedTCPConnections
-    /// Seconds between polls in verifyEstablishment. 0 in tests.
+    /// Seconds between polls in verifyEstablishment. 0 is for tests only — with the live netstat source it would busy-spin.
     var pollInterval: TimeInterval = 0.5
 
     func snapshot(ip: String) throws -> Set<TCPConnection> {
@@ -92,18 +99,30 @@ struct RouteVerifier {
                              timeout: TimeInterval = 5.0) throws -> RouteVerdict {
         let deadline = Date().addingTimeInterval(timeout)
         var lastNew = 0
+        var sampled = false
+        var lastError: Error?
         repeat {
-            let now = try snapshot(ip: ip)
-            let fresh = now.subtracting(baseline)
-            lastNew = fresh.count
-            if fresh.count >= 2 {
-                return RouteVerdict(
-                    verified: true,
-                    evidence: "\(fresh.count) new connections to \(ip) (ports \(fresh.map { String($0.remotePort) }.sorted().joined(separator: ", ")))",
-                    advisory: nil)
+            do {
+                let now = try snapshot(ip: ip)
+                sampled = true
+                let fresh = now.subtracting(baseline)
+                lastNew = fresh.count
+                if fresh.count >= 2 {
+                    return RouteVerdict(
+                        verified: true,
+                        evidence: "\(fresh.count) new connections to \(ip) (ports \(fresh.map { $0.remotePort }.sorted().map(String.init).joined(separator: ", ")))",
+                        advisory: nil)
+                }
+            } catch {
+                // One bad netstat sample must not discard the whole polling
+                // window — keep polling toward the deadline. If EVERY sample
+                // failed we throw below instead of faking a "no connections"
+                // verdict (a netstat outage is not evidence of a dead route).
+                lastError = error
             }
             if pollInterval > 0 { Thread.sleep(forTimeInterval: pollInterval) }
         } while Date() < deadline
+        if !sampled, let err = lastError { throw err }
         return RouteVerdict(
             verified: false,
             evidence: lastNew == 0
