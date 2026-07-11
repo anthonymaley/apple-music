@@ -199,7 +199,16 @@ func runSpeakerVerify(name: String?, backend: AppleScriptBackend, json: Bool) th
                             "claimedSelected": claimed])
             continue
         }
-        let verdict = try verifier.steadyState(ip: ip)
+        let verdict: RouteVerdict
+        do {
+            verdict = try verifier.steadyState(ip: ip)
+        } catch {
+            // netstat failing is not evidence about the route — degrade this
+            // row honestly instead of aborting every target's verdict.
+            verdict = RouteVerdict(verified: false,
+                                   evidence: "verification errored: \(error.localizedDescription)",
+                                   advisory: nil)
+        }
         var row: [String: Any] = ["name": target, "verified": verdict.verified, "ip": ip,
                                   "evidence": verdict.evidence, "claimedSelected": claimed]
         if let advisory = verdict.advisory { row["advisory"] = advisory }
