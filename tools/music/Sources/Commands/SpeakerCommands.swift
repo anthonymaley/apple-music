@@ -174,8 +174,31 @@ func runSpeakerSmart(args: [String], json: Bool) throws {
                 throw AppleScriptBackend.ScriptError.speakerUnavailable(resolved)
             }
         }
+        // Verify first — only reset what the network says is actually broken.
+        // (Blind reset tore down healthy routes too.)
+        let verifier = RouteVerifier()
+        let devices = (try? fetchSpeakerDevices()) ?? []
+        let routed = devices
+            .filter { ($0["selected"] as? Bool == true) && ($0["kind"] as? String != "computer") }
+            .compactMap { $0["name"] as? String }
+        var broken: Set<String> = []
+        for speaker in routed {
+            guard let ip = verifier.resolver.resolveIP(forSpeaker: speaker) else {
+                broken.insert(speaker)   // can't verify → treat as suspect
+                continue
+            }
+            if !((try? verifier.steadyState(ip: ip))?.verified ?? false) {
+                broken.insert(speaker)
+            } else {
+                print("✓ \(speaker) verified — leaving it alone.")
+            }
+        }
+        if broken.isEmpty && !routed.isEmpty {
+            print("All routed speakers verified. Nothing to reset.")
+            return
+        }
         let reset = withStatus("Resetting AirPlay speakers...") {
-            resetAirPlaySpeakers(backend: backend)
+            resetAirPlaySpeakers(backend: backend, only: broken.isEmpty ? nil : broken)
         }
         if reset.isEmpty {
             print("No active AirPlay speakers to reset.")
@@ -410,7 +433,7 @@ struct SpeakerSnapshot {
 /// Clears ghost connections by forcing the AirPlay stack to fully tear down and rebuild sessions.
 /// Returns the speakers that were reset, empty if none needed resetting.
 @discardableResult
-func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
+func resetAirPlaySpeakers(backend: AppleScriptBackend, only: Set<String>? = nil) -> [SpeakerSnapshot] {
     guard let devices = try? fetchSpeakerDevices() else {
         errorOut("✗ Couldn't enumerate AirPlay speakers to reset.")
         verbose("reset: fetchSpeakerDevices failed, skipping")
@@ -418,6 +441,7 @@ func resetAirPlaySpeakers(backend: AppleScriptBackend) -> [SpeakerSnapshot] {
     }
     let nonLocal = devices.filter {
         ($0["selected"] as? Bool == true) && ($0["kind"] as? String != "computer")
+            && (only == nil || only!.contains($0["name"] as! String))
     }
     guard !nonLocal.isEmpty else { return [] }
 
