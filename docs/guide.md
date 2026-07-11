@@ -70,7 +70,8 @@ Current TUI contract:
 - `Enter` plays the highlighted row.
 - Keys: `1/2/3` jump to a tab, `Tab`/`Shift-Tab` cycle, `↑↓` + `PgUp/PgDn/Home/End` navigate, `Space` play/pause, `</>` previous/next, `[ ]` seek (Now) / `←→` per-speaker volume (Speakers), `z` shuffle-play, `l` favorite, `+/-` master volume, `n` next-up options, `Esc` back, `q` quit.
 - The Now tab has a **playback-control grid** (Shuffle / Order / Repeat / Genius) under the track progress, showing each value live with the active one lit. Press `←` to focus the grid and `→` to return to the Up Next list; `↑↓` move between control rows and `Enter` cycles the focused row's value (Shuffle on/off, Order Songs→Albums→Groupings, Repeat Off→All→One, Genius triggers). The `s`/`m`/`r`/`g` keys do the same from anywhere. Shuffle/order/repeat write Music's state directly (no extra permission); Genius rebuilds the queue from the current song and is UI-scripted (needs the same Accessibility permission as the equalizer). Distinct from the global `z`, which shuffle-*plays* the current context.
-- Speaker wake is explicit via `music speaker wake`; normal playback does not auto-reset AirPlay outputs.
+- Named-speaker `music play`, and `music speaker` add/`set`/`only`, verify the route automatically while playing (network-truth — established TCP connections to the speaker, not the AppleScript `selected` claim, which can lie) and print `✓ <speaker> verified (…)`; while paused, routing prints `Route set; will verify on next play.` instead, since a paused route can't be network-verified. An unestablished route triggers an automatic heal — an away-and-back reroute, then a transport-cycle reset — before an honest failure names the manual fix. `music speaker wake` also verifies first now and resets only the routes that are actually broken (`✓ X verified — leaving it alone.` for the rest). Routing to the Mac's own output is never "verified" — local output has no AirPlay session.
+- Toggling a speaker on in the Speakers scene while playing verifies the route the same way and toasts if it couldn't be verified; toggling off, or toggling while paused, skips verification.
 - The Speakers scene has an **EQ block**: an `EQ on/off` power row (`Enter` toggles it; `e` does the same from anywhere in the scene) and a `Preset` row beneath it — `Enter` expands an inline preset picker (venue pack first, then Music's built-in presets), `↑↓` to navigate, `Enter` to select and auto-enable EQ, `Escape` to collapse without changing the preset. With the Preset row highlighted but the picker collapsed, `←`/`→` quick-cycles presets one at a time.
 - Below the EQ block, a **Visualizer** row toggles Music's on-screen visualizer (`Enter`, or `v` from anywhere in the scene). GUI-only — the visuals render in the Music window on the Mac's display, and turning it on brings Music forward.
 - Music's Autoplay (∞) must stay OFF — playlist track-selection drives playback track-by-track and relies on each track stopping at its end.
@@ -108,6 +109,7 @@ music now --json
 music search "Fouk" --limit 20 --json
 music add --to "House"             # add current song to a playlist
 music remove                       # remove current song from current playlist
+music speaker verify --json        # network-truth verdict for selected speakers
 music playlist list --json
 ```
 
@@ -163,6 +165,8 @@ User says:  /music play Fouk in the kitchen and living room at 60%
 3. The CLI's PlayParser (deterministic, unit-tested) extracts:
    query "Fouk" · speakers Kitchen, Living Room · volume 60
 4. Routes to exactly those speakers, sets volume, plays
+5. Verifies each route (network-truth) once playback starts;
+   an unestablished route heals automatically before an honest failure
 ```
 
 ### How a composition request executes
@@ -309,10 +313,11 @@ music auth status
 | AirPods apostrophe | Names like "Anthony's AirPods Pro" break quoting | Speaker commands use fuzzy matching |
 | Play shows "Nothing playing" | AppleScript `current track` unavailable during cold start | Retry loop waits up to 3s for track to load |
 | ArgumentParser crash on bare invocation | Property wrappers crash when read on directly-constructed structs | Shared logic extracted to standalone functions |
+| Speaker shows selected but stays silent (ghost) | Music's `selected`/`active` scripting read-backs can lie about the real session | Run `music speaker verify --json` before touching anything — keep the output as evidence |
 
 ## Version
 
-v3.1.0 — all four locations stay in sync:
+v3.3.0 — all four locations stay in sync:
 - `.claude-plugin/plugin.json` → `version`
 - `.claude-plugin/marketplace.json` → `metadata.version`
 - `.claude-plugin/marketplace.json` → `plugins[0].version`

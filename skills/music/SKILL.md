@@ -25,7 +25,7 @@ music play kid a in the kitchen and living room at 60
 music play jazz for cooking kitchen 40 shuffle
 ```
 
-Naming speakers routes playback to exactly those speakers (it deselects the rest). Don't pre-chain `music speaker` + `music volume` for simple play requests — `music play` does all three. If the query itself contains a speaker-like word, use the explicit flags (`--song`, `--album`, `--playlist`) instead.
+Naming speakers routes playback to exactly those speakers (it deselects the rest). Don't pre-chain `music speaker` + `music volume` for simple play requests — `music play` does all three. If the query itself contains a speaker-like word, use the explicit flags (`--song`, `--album`, `--playlist`) instead. Named-speaker plays are verified automatically once playback starts (`✓ <speaker> verified (…)`); an unestablished route triggers an automatic heal before an honest failure message.
 
 ## Architecture
 
@@ -74,12 +74,16 @@ music speaker kitchen 40                      # add kitchen at volume 40
 music speaker kitchen stop                    # remove kitchen from group
 music speaker airpods only                    # deselect all, select airpods only
 music speaker 1 2 5                           # add speakers by index from last list
-music speaker wake                            # wake all active speakers (fix ghost connections)
-music speaker wake kitchen                    # wake a specific speaker
+music speaker wake                            # verify all active speakers, reset only the broken ones
+music speaker wake kitchen                    # verify + wake a specific speaker
+music speaker verify                          # network-truth verdict for all selected speakers
+music speaker verify kitchen                  # verify one speaker (--json for structured output)
 music speaker set "Kitchen"                   # hidden alias (skill compat)
 music speaker add "Bedroom"                   # hidden alias
 music speaker remove "Bedroom"                # hidden alias
 ```
+
+`music speaker <name>` (add), `set`, and `only` verify the route automatically while playing — output gains a `✓ <speaker> verified (…)` line, and an unverified route triggers an automatic heal (away-and-back reroute, then a transport-cycle reset) before falling back to an honest failure naming the manual fix. While paused, routing can't be network-verified — it prints `Route set; will verify on next play.` and re-checks when playback starts. Scripting's own claims (`selected`, `active`) are shown as advisory only, not trusted, because they can lie. Routing to the Mac's own output is never "verified" — local output has no AirPlay session.
 
 ## Volume (no auth)
 
@@ -189,7 +193,7 @@ music                                         # unified shell: Now / Playlists /
 
 Bare `music` is the main interactive surface — a tabbed shell with **Now**, **Playlists**, and **Speakers** tabs. (`music now` / `music now --json` and `music playlist <subcommand>` are non-interactive CLI commands, documented above.) Four one-shot quick pickers also exist for terminal/slash-command use: bare `music speaker` (AirPlay picker), bare `music volume` (mixer), and the `music similar` / `music suggest` result pickers.
 
-TUI behavior: the Now tab shows the current album context; selecting a playlist on the Playlists tab pins it on the Now tab. Cursor movement is local and fast.
+TUI behavior: the Now tab shows the current album context; selecting a playlist on the Playlists tab pins it on the Now tab. Cursor movement is local and fast. On the Speakers tab, toggling a speaker on while playing verifies the route and toasts if it couldn't be verified.
 
 TUI controls: `1/2/3` switch tabs (Now / Playlists / Speakers), `Tab`/`Shift-Tab` cycle tabs, `↑↓` navigate (`PgUp/PgDn/Home/End` for long lists), `Enter` play/open selected, `←→` seek (Now) or volume (Speakers), `Space` pause, `</>` previous/next track (full up/down through the playlist), `z`/`r` shuffle, `l` favorite, `+/-` volume, `n` next-up options (Now), `/` filter playlists (arrows navigate while typing), `Esc` back, `q` quit. Playlist track-play requires Music's Autoplay (∞) turned OFF — it drives playback track-by-track and needs each track to stop at its end.
 

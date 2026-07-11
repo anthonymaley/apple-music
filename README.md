@@ -155,7 +155,7 @@ music auth status
 | `music seek +30` / `music seek 1:30` | Seek within the current track (relative or absolute) |
 | `music love` / `music unlove` | Favorite / unfavorite the current track |
 
-Naming speakers in `music play` routes playback to **exactly those speakers** — it selects the ones you name and deselects the rest. Routing never forces a wake/reset cycle during normal playback; if a speaker shows connected but stays silent, run `music speaker wake [name]`.
+Naming speakers in `music play` routes playback to **exactly those speakers** — it selects the ones you name and deselects the rest, then verifies each route is actually carrying a session (network-truth, not the AppleScript `selected` claim, which can lie) and prints `✓ <speaker> verified (…)`. If a route doesn't establish, an automatic heal runs — an away-and-back reroute, then a transport-cycle reset — before an honest failure message names the manual fix. Routing to the Mac's own output is never "verified" — local output has no AirPlay session to check.
 
 ### Speakers & Volume
 
@@ -166,12 +166,15 @@ Naming speakers in `music play` routes playback to **exactly those speakers** �
 | `music speaker kitchen 40` | Add kitchen at volume 40 |
 | `music speaker kitchen stop` | Remove kitchen from group |
 | `music speaker airpods only` | Switch to AirPods only |
-| `music speaker wake [kitchen]` | Wake all (or one) active speakers — fixes ghost connections |
+| `music speaker wake [kitchen]` | Verify active speakers first, then reset only the ones that didn't establish |
+| `music speaker verify [kitchen]` | Network-truth verdict: is the route actually carrying a session? No name = verify all selected speakers (`--json` supported) |
 | `music speaker 1 2 5` | Add speakers by number from last list |
 | `music volume` | Interactive per-speaker volume mixer |
 | `music volume 60` | Set all active speakers to 60 |
 | `music volume up` / `down` | Volume ±10 |
 | `music volume kitchen 80` | Set a specific speaker to 80 |
+
+Adding a speaker, `music speaker set`, or `music speaker only` verify the route automatically while playing and heal it if needed; while paused they print `Route set; will verify on next play.` — paused routes can't be verified over the network, so the next play re-checks them.
 
 ### Equalizer
 
@@ -338,7 +341,7 @@ Under the track progress is a **control grid** (Shuffle / Order / Repeat / Geniu
 
 ![Playlist Browser](media/playlist.jpg)
 
-**Speakers tab** — `↑↓` select, `Enter` toggles AirPlay outputs on/off, `←→` adjusts per-speaker volume. Active speakers show volume bars. Below the outputs: an **EQ block** (power row + preset picker — `Enter` toggles/expands, `e` toggles from anywhere) and a **Visualizer** row (`Enter` or `v` toggles Music's on-screen visuals). (The `music speaker`, `music eq`, and `music visualizer` CLIs drive these non-interactively.)
+**Speakers tab** — `↑↓` select, `Enter` toggles AirPlay outputs on/off, `←→` adjusts per-speaker volume. Active speakers show volume bars. Toggling a speaker on while playing verifies the route and toasts (e.g. `'X' selected but route NOT verified — try: music speaker wake`) if it couldn't be verified. Below the outputs: an **EQ block** (power row + preset picker — `Enter` toggles/expands, `e` toggles from anywhere) and a **Visualizer** row (`Enter` or `v` toggles Music's on-screen visuals). (The `music speaker`, `music eq`, and `music visualizer` CLIs drive these non-interactively.)
 
 ![Speaker Picker](media/speakers.png)
 
