@@ -416,7 +416,7 @@ final class SpeakersScene: Scene {
             if playing, let ip = ip, let baseline = baseline {
                 let verdict = try? verifier.verifyEstablishment(ip: ip, baseline: baseline, timeout: 3.0)
                 try require(verdict?.verified ?? true,
-                            "'\(name)' selected but route NOT verified — try r (reset) or: music speaker verify")
+                            "'\(name)' selected but route NOT verified — try: music speaker wake")
             }
         }
     }
