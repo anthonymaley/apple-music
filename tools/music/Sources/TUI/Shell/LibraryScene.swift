@@ -9,7 +9,13 @@ final class LibraryScene: Scene {
     let id: SceneID = .library
     let tabTitle = "Library"
     var capturesAllInput: Bool { capturing }
-    var footerHint: String { "[ ] View  Enter Open  / Filter  p Play  s Shuffle" }
+    var footerHint: String {
+        if capturing { return "type to filter  Enter Apply  Esc Clear" }
+        // `/` is a no-op at the tracks level, so drop it from the hint there.
+        return isTracksLevel
+            ? "[ ] View  Enter Play  \u{2190} Back  p Play  s Shuffle"
+            : "[ ] View  Enter Open  / Filter  p Play  s Shuffle"
+    }
 
     private let backend: AppleScriptBackend
     private let sources: LibraryDataSources
@@ -20,20 +26,25 @@ final class LibraryScene: Scene {
     private var nav = LibraryNav.initial
     private var albums: [LibraryAlbum] = []
     private var albumsLoaded = false
-    private var tracks: [String] = []
-    private var tracksLoading = false
     private var filter = ""
     private var capturing = false
     private var railScroll = 0
     private var trackScroll = 0
 
-    // Off-thread loads land here and are drained in tick() on the main thread,
-    // so a slow REST/AppleScript round-trip never blocks a render frame
-    // (mirrors SpeakersScene / PlaylistsScene).
+    // One track cache keyed by album id, shared by the right-pane preview (album
+    // level) and the drilled-in tracks level. Because render always reads the
+    // FOCUSED album's cache — never a stale in-flight result — the wrong-album
+    // race can't happen, and Enter is instant when the preview already landed.
+    // trackCache / previewInFlight are main-thread-only (tick + handle); the
+    // background fetch posts to previewInbox under inboxLock and tick drains it
+    // (same inbox+NSLock discipline as SpeakersScene / PlaylistsScene).
+    private var trackCache: [String: [String]] = [:]
+    private var previewInFlight: Set<String> = []
+    private let previewQueue = DispatchQueue(label: "music.library.preview")
+
     private let inboxLock = NSLock()
     private var albumsInbox: [LibraryAlbum]? = nil
-    private var tracksInbox: [String]? = nil
-    private let tracksQueue = DispatchQueue(label: "music.library.tracks")
+    private var previewInbox: [(id: String, tracks: [String])] = []
 
     init(backend: AppleScriptBackend, sources: LibraryDataSources,
          appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
@@ -58,13 +69,18 @@ final class LibraryScene: Scene {
         }
     }
 
-    private func loadTracks(title: String, artist: String) {
+    /// Kick a serial background fetch of one album's tracks, unless it's already
+    /// cached or in flight. Serial so a fast scroll can't pile concurrent
+    /// full-library predicate scans onto Music. Called only from the main thread.
+    private func kickTrackFetch(albumID: String, title: String, artist: String) {
+        guard trackCache[albumID] == nil, !previewInFlight.contains(albumID) else { return }
+        previewInFlight.insert(albumID)
         let sources = self.sources
-        tracksQueue.async { [weak self] in
+        previewQueue.async { [weak self] in
             let fetched = sources.onAlbumTracks(title, artist)
             guard let self else { return }
             self.inboxLock.lock()
-            self.tracksInbox = fetched
+            self.previewInbox.append((albumID, fetched))
             self.inboxLock.unlock()
         }
     }
@@ -76,8 +92,9 @@ final class LibraryScene: Scene {
         var changed = false
         inboxLock.lock()
         let freshAlbums = albumsInbox; albumsInbox = nil
-        let freshTracks = tracksInbox; tracksInbox = nil
+        let landedPreviews = previewInbox; previewInbox = []
         inboxLock.unlock()
+
         if let freshAlbums {
             albums = freshAlbums
             albumsLoaded = true
@@ -87,11 +104,22 @@ final class LibraryScene: Scene {
             }
             changed = true
         }
-        if let freshTracks {
-            tracks = freshTracks
-            tracksLoading = false
-            if isTracksLevel, nav.cursor >= tracks.count { nav.cursor = max(0, tracks.count - 1) }
+        for item in landedPreviews {
+            trackCache[item.id] = item.tracks
+            previewInFlight.remove(item.id)
             changed = true
+        }
+        // Clamp the track cursor once the drilled album's tracks land.
+        if case .tracks(let id, _, _) = nav.current, let t = trackCache[id], nav.cursor >= t.count {
+            nav.cursor = max(0, t.count - 1)
+        }
+
+        // Lazily fetch the focused album's preview when the right pane is visible
+        // (three-zone layout) — mirrors PlaylistsScene's preview kick in tick.
+        if nav.subView == .albums, isAlbumList,
+           playlistZones(width: ScreenFrame.current().width).mode == .three,
+           let a = focusedAlbum(), trackCache[a.id] == nil, !previewInFlight.contains(a.id) {
+            kickTrackFetch(albumID: a.id, title: a.name, artist: a.artist)
         }
         return changed
     }
@@ -187,10 +215,11 @@ final class LibraryScene: Scene {
 
     private func execute(_ action: LibraryAction) {
         switch action {
-        case .fetchAlbumTracks(_, let title, let artist):
-            tracks = []
-            tracksLoading = true
-            loadTracks(title: title, artist: artist)
+        case .fetchAlbumTracks(let albumID, let title, let artist):
+            // Reuse the shared cache: if the preview already loaded it, this is a
+            // no-op and the tracks level paints instantly; otherwise it kicks the
+            // same serial fetch and the pane shows "loading…" until it lands.
+            kickTrackFetch(albumID: albumID, title: title, artist: artist)
         case .play(.album(_, let title, let artist)):
             playAlbum(title: title, artist: artist, shuffle: false)
         case .shuffle(.album(_, let title, let artist)):
@@ -224,7 +253,7 @@ final class LibraryScene: Scene {
     private func currentRowCount() -> Int {
         switch nav.current {
         case .albumList: return visibleAlbumIndices().count
-        case .tracks: return tracks.count
+        case .tracks(let id, _, _): return trackCache[id]?.count ?? 0
         default: return 0   // artists/songs later
         }
     }
@@ -362,42 +391,51 @@ final class LibraryScene: Scene {
         }
         y += 1
 
-        if isTracksLevel {
-            out += ANSICode.moveTo(row: y, col: z.heroX)
-            let n = tracksLoading ? "\u{2026}" : "\(tracks.count)"
-            out += "\(ANSICode.dim)\(n) tracks\(ANSICode.reset)"
-            y += 2
-        } else { y += 1 }
+        // Track count once the album's tracks are cached (line reserved either way
+        // so the hint below doesn't jump when the count lands).
+        out += ANSICode.moveTo(row: y, col: z.heroX)
+        if let cached = trackCache[a.id] {
+            out += "\(ANSICode.dim)\(cached.count) tracks\(ANSICode.reset)"
+        }
+        y += 2
 
         out += ANSICode.moveTo(row: y, col: z.heroX)
         out += "\(ANSICode.lime)[Enter]\(ANSICode.reset) Open   \(ANSICode.lime)[P]\(ANSICode.reset) Play   \(ANSICode.lime)[S]\(ANSICode.reset) Shuffle   \(ANSICode.lime)[/]\(ANSICode.reset) Filter"
     }
 
     private func renderRightPane(_ z: PlaylistZones, into out: inout String, contentTop: Int, bodyBottom: Int) {
-        guard z.mode == .three, let rx = z.rightX else { return }
+        guard z.mode == .three, let rx = z.rightX, let a = focusedAlbum() else { return }
         var y = contentTop
-        guard isTracksLevel else {
-            out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.cyan)Tracks\(ANSICode.reset)"; y += 1
-            out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: min(z.rightWidth, 18)))\(ANSICode.reset)"; y += 1
-            out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.dim)Enter to open an album\(ANSICode.reset)"
+        let cached = trackCache[a.id]
+        out += ANSICode.moveTo(row: y, col: rx)
+        out += "\(ANSICode.cyan)Tracks\(ANSICode.reset)" + (cached.map { " \(ANSICode.dim)\($0.count)\(ANSICode.reset)" } ?? "")
+        y += 1
+        out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: min(z.rightWidth, 18)))\(ANSICode.reset)"
+        y += 1
+        guard let lines = cached else {
+            out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.dim)Loading\u{2026}\(ANSICode.reset)"
             return
         }
-        out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.cyan)Tracks\(ANSICode.reset) \(ANSICode.dim)\(tracks.count)\(ANSICode.reset)"; y += 1
-        out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.dim)\(String(repeating: "\u{2500}", count: min(z.rightWidth, 18)))\(ANSICode.reset)"; y += 1
-        if tracks.isEmpty {
-            out += ANSICode.moveTo(row: y, col: rx)
-            out += "\(ANSICode.dim)\(tracksLoading ? "Loading\u{2026}" : "(empty)")\(ANSICode.reset)"
+        if lines.isEmpty {
+            out += ANSICode.moveTo(row: y, col: rx) + "\(ANSICode.dim)(empty)\(ANSICode.reset)"
             return
         }
+        // Cursor highlight only at the tracks level; the album-level preview is a
+        // plain dim list (no cursor), matching PlaylistsScene's preview pane.
+        let atTracks = isTracksLevel
         let maxVis = max(1, bodyBottom - y + 1)
-        let cur = min(max(0, nav.cursor), tracks.count - 1)
-        if cur < trackScroll { trackScroll = cur }
-        if cur >= trackScroll + maxVis { trackScroll = cur - maxVis + 1 }
-        let end = min(tracks.count, trackScroll + maxVis)
+        let cur = atTracks ? min(max(0, nav.cursor), lines.count - 1) : -1
+        if atTracks {
+            if cur < trackScroll { trackScroll = cur }
+            if cur >= trackScroll + maxVis { trackScroll = cur - maxVis + 1 }
+        } else {
+            trackScroll = 0
+        }
+        let end = min(lines.count, trackScroll + maxVis)
         for i in trackScroll..<end {
             out += ANSICode.moveTo(row: y, col: rx)
             let idx = String(format: "%02d", i + 1)
-            let text = truncText(tracks[i], to: max(2, z.rightWidth - 4))
+            let text = truncText(lines[i], to: max(2, z.rightWidth - 4))
             if i == cur {
                 out += "\(ANSICode.inverse)\(idx)  \(text)\(ANSICode.reset)"
             } else {

@@ -23,7 +23,10 @@ func runShell() {
         case .playlists:
             let fetched = fetchUserPlaylistNames(backend: backend)
             let names = fetched.names
-            guard !names.isEmpty else { return nil }
+            guard !names.isEmpty else {
+                status.post("No playlists found.", error: true)
+                return nil
+            }
             let scene = PlaylistsScene(backend: backend,
                                        playlists: names,
                                        subscriptionNames: fetched.subscription,
@@ -67,10 +70,9 @@ func runShell() {
 
     // Refusing a tab switch must say why — a dead keypress reads as a broken key.
     func switchOrExplain(_ id: SceneID) {
+        // Each ensureScene refusal owns its toast (Playlists: "No playlists found.";
+        // Library: "Sign in…"), so there is no generic cross-tab fallback here.
         if ensureScene(id) != nil { router.switchTo(id) }
-        // ensureScene already posts a specific reason for some tabs (e.g. Library:
-        // "sign in"); only fall back to the generic message when it stayed silent.
-        else if status.current() == nil { status.post("No playlists found.", error: true) }
     }
 
     terminal.enterRawMode()
