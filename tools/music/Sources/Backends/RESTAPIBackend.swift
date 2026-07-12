@@ -77,6 +77,18 @@ struct RESTAPIBackend {
         return try parseCatalogSong(from: data)
     }
 
+    // MARK: - Library Browse (require user token)
+
+    func libraryAlbums(limit: Int = 100, offset: Int = 0) async throws -> [LibraryAlbum] {
+        guard userToken != nil else { throw AuthError.userTokenRequired }
+        let (data, status) = try await get(libraryAlbumsPath(limit: limit, offset: offset))
+        guard (200...299).contains(status) else {
+            if status == 401 || status == 403 { throw AuthError.userTokenExpired(status) }
+            throw APIError.requestFailed(status)
+        }
+        return parseLibraryAlbums(from: data)
+    }
+
     // MARK: - Library Operations (require user token)
 
     func addToLibrary(songIDs: [String]) async throws {
@@ -285,6 +297,31 @@ func parseCatalogPlaylistObject(_ playlist: [String: Any]) -> CatalogPlaylist {
         id: playlist["id"] as? String ?? "",
         name: attrs["name"] as? String ?? "Unknown",
         curator: attrs["curatorName"] as? String ?? "")
+}
+
+// MARK: - Library browse (pure helpers)
+
+struct LibraryAlbum { let id: String; let name: String; let artist: String
+    func toDict() -> [String: Any] { ["id": id, "name": name, "artist": artist] } }
+
+func libraryAlbumsPath(limit: Int, offset: Int) -> String {
+    "/v1/me/library/albums?limit=\(limit)&offset=\(offset)"
+}
+
+// Library list endpoints return resources under a top-level `data` array
+// (unlike catalog search's results{<key>}{data}).
+func parseLibraryDataArray(from data: Data) -> [[String: Any]] {
+    let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    return json?["data"] as? [[String: Any]] ?? []
+}
+
+func parseLibraryAlbums(from data: Data) -> [LibraryAlbum] {
+    parseLibraryDataArray(from: data).map { obj in
+        let a = obj["attributes"] as? [String: Any] ?? [:]
+        return LibraryAlbum(id: obj["id"] as? String ?? "",
+                            name: a["name"] as? String ?? "Unknown",
+                            artist: a["artistName"] as? String ?? "Unknown")
+    }
 }
 
 enum APIError: Error, LocalizedError {
