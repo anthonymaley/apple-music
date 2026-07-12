@@ -13,7 +13,7 @@ func runShell() {
 
     let router = Router(root: .nowPlaying)
     var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions)]
-    let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists"), (.speakers, "Speakers")]
+    let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists"), (.speakers, "Speakers"), (.library, "Library")]
 
     // Lazily build a scene the first time it's shown. Returns nil if it can't be
     // built (e.g. no playlists), so the caller can refuse the switch.
@@ -37,6 +37,29 @@ func runShell() {
             let scene = SpeakersScene(backend: backend, status: status, actions: actions)
             scenes[id] = scene
             return scene
+        case .library:
+            // Library browse needs a signed-in user (library endpoints) and a
+            // configured developer token. Refuse with a toast rather than a dead
+            // key when either is missing.
+            let auth = AuthManager()
+            guard auth.userToken() != nil else {
+                status.post("Sign in to browse your library (music auth login).", error: true)
+                return nil
+            }
+            guard let devToken = try? auth.requireDeveloperToken() else {
+                status.post("Apple Music isn't configured (music auth setup).", error: true)
+                return nil
+            }
+            let api = RESTAPIBackend(developerToken: devToken,
+                                     userToken: auth.userToken(),
+                                     storefront: auth.storefront())
+            let scene = LibraryScene(backend: backend,
+                                     sources: makeLibraryDataSources(api: api, backend: backend),
+                                     appQueue: appQueue,
+                                     status: status,
+                                     actions: actions)
+            scenes[id] = scene
+            return scene
         default:
             return nil
         }
@@ -45,7 +68,9 @@ func runShell() {
     // Refusing a tab switch must say why — a dead keypress reads as a broken key.
     func switchOrExplain(_ id: SceneID) {
         if ensureScene(id) != nil { router.switchTo(id) }
-        else { status.post("No playlists found.", error: true) }
+        // ensureScene already posts a specific reason for some tabs (e.g. Library:
+        // "sign in"); only fall back to the generic message when it stayed silent.
+        else if status.current() == nil { status.post("No playlists found.", error: true) }
     }
 
     terminal.enterRawMode()
@@ -114,7 +139,7 @@ func runShell() {
                 out += "\(color)\(truncText(t.text, to: max(1, frame.width - 4)))\(ANSICode.reset)"
             } else {
                 let globals = "Space \u{23EF}  < > Skip  z Shuffle  +/\u{2212} Vol"
-                out += "\(ANSICode.dim)1/2/3 Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
+                out += "\(ANSICode.dim)1/2/3/4 Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
             }
             // Synchronized output (terminals that don't support it ignore the
             // escapes): the clear-then-paint inside one frame can't tear.
