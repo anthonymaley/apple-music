@@ -174,6 +174,12 @@ final class LibraryScene: Scene {
     private var artistAlbumsInbox: (artistID: String, albums: [LibraryAlbum])? = nil
     private var previewInbox: [(id: String, tracks: [String])] = []
 
+    // Real hero covers: store owns fetch/cache/render; onReady sets artDirty
+    // under inboxLock (same discipline as the streaming inboxes) and tick
+    // drains it into `changed` so the swap paints on the next frame.
+    private let artwork = ArtworkStore()
+    private var artDirty = false
+
     init(backend: AppleScriptBackend, sources: LibraryDataSources,
          appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
         self.backend = backend
@@ -301,6 +307,7 @@ final class LibraryScene: Scene {
         let artistsWalkDone = artistsDone
         let freshArtistAlbums = artistAlbumsInbox; artistAlbumsInbox = nil
         let landedPreviews = previewInbox; previewInbox = []
+        let artLanded = artDirty; artDirty = false
         inboxLock.unlock()
 
         // Streaming lists only grow (append), so a landed page can't push the cursor
@@ -352,6 +359,7 @@ final class LibraryScene: Scene {
             previewInFlight.remove(item.id)
             changed = true
         }
+        if artLanded { changed = true }
         // Clamp the track cursor once the drilled album's tracks land.
         if case .tracks(let id, _, _) = nav.current, let t = trackCache[id], nav.cursor >= t.count {
             nav.cursor = max(0, t.count - 1)
@@ -877,13 +885,33 @@ final class LibraryScene: Scene {
 
         let gw = min(28, z.heroWidth)
         let gh = 10
-        let block = gradientBlock(name: a.name + a.artist, width: gw, height: gh)
-        var seed = 0; for b in (a.name + a.artist).unicodeScalars { seed = (seed &* 31 &+ Int(b.value)) & 0xffffff }
-        let r = 80 + (seed & 0x7f), g = 80 + ((seed >> 8) & 0x7f), bl = 80 + ((seed >> 16) & 0x7f)
-        let color = "\u{1B}[38;2;\(r);\(g);\(bl)m"
-        for line in block {
-            out += ANSICode.moveTo(row: y, col: z.heroX) + "\(color)\(line)\(ANSICode.reset)"
-            y += 1
+        var artLines: [String]? = nil
+        if let template = a.artworkURL {
+            artLines = artwork.lines(key: a.id,
+                                     url: ArtworkStore.resolveURL(template, width: 300, height: 300),
+                                     width: gw, height: gh) { [weak self] in
+                guard let self else { return }
+                self.inboxLock.lock(); self.artDirty = true; self.inboxLock.unlock()
+            }
+        }
+        if let art = artLines {
+            // Pad/cap to exactly gh rows so the hero's height never shifts and
+            // stale gradient rows are overwritten (chafa may emit fewer rows).
+            let blank = String(repeating: " ", count: gw)
+            let rows = art.prefix(gh) + Array(repeating: blank, count: max(0, gh - art.count))
+            for line in rows {
+                out += ANSICode.moveTo(row: y, col: z.heroX) + line + ANSICode.reset
+                y += 1
+            }
+        } else {
+            let block = gradientBlock(name: a.name + a.artist, width: gw, height: gh)
+            var seed = 0; for b in (a.name + a.artist).unicodeScalars { seed = (seed &* 31 &+ Int(b.value)) & 0xffffff }
+            let r = 80 + (seed & 0x7f), g = 80 + ((seed >> 8) & 0x7f), bl = 80 + ((seed >> 16) & 0x7f)
+            let color = "\u{1B}[38;2;\(r);\(g);\(bl)m"
+            for line in block {
+                out += ANSICode.moveTo(row: y, col: z.heroX) + "\(color)\(line)\(ANSICode.reset)"
+                y += 1
+            }
         }
         y += 1
 
