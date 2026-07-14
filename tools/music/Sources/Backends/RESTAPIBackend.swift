@@ -137,6 +137,7 @@ struct RESTAPIBackend {
     struct LibraryPlaylist {
         let id: String
         let name: String
+        var artworkURL: String? = nil
     }
 
     /// All library playlists, following pagination. User-created playlists are
@@ -153,7 +154,8 @@ struct RESTAPIBackend {
             for item in json?["data"] as? [[String: Any]] ?? [] {
                 let attrs = item["attributes"] as? [String: Any] ?? [:]
                 guard let id = item["id"] as? String, let name = attrs["name"] as? String else { continue }
-                out.append(LibraryPlaylist(id: id, name: name))
+                out.append(LibraryPlaylist(id: id, name: name,
+                                           artworkURL: (attrs["artwork"] as? [String: Any])?["url"] as? String))
             }
             path = json?["next"] as? String
         }
@@ -332,6 +334,7 @@ func parseCatalogPlaylistObject(_ playlist: [String: Any]) -> CatalogPlaylist {
 // MARK: - Library browse (pure helpers)
 
 struct LibraryAlbum { let id: String; let name: String; let artist: String; let trackCount: Int
+    var artworkURL: String? = nil
     func toDict() -> [String: Any] { ["id": id, "name": name, "artist": artist, "trackCount": trackCount] } }
 
 func libraryAlbumsPath(limit: Int, offset: Int) -> String {
@@ -354,7 +357,8 @@ func parseLibraryAlbums(from data: Data) -> [LibraryAlbum] {
                             // Library-albums trackCount = tracks of this album IN the
                             // library; a loose playlist-song stub reads as 1, which the
                             // album-artists filter uses to exclude it. Missing → 0.
-                            trackCount: a["trackCount"] as? Int ?? 0)
+                            trackCount: a["trackCount"] as? Int ?? 0,
+                            artworkURL: (a["artwork"] as? [String: Any])?["url"] as? String)
     }
 }
 

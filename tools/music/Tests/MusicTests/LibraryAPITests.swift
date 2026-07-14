@@ -148,4 +148,22 @@ final class LibraryAPITests: XCTestCase {
         let raw = "bad\(fs)X\(fs)Y\n\n30\(fs)Kelly\(fs)Air"   // non-numeric index + blank line dropped
         XCTAssertEqual(parseLibraryTrackPositions(raw).map(\.index), [30])
     }
+
+    func testParseLibraryAlbumsReadsArtworkURL() {
+        let json = """
+        {"data":[{"id":"l.1","attributes":{"name":"Crush","artistName":"Floating Points",
+          "trackCount":12,"artwork":{"width":1200,"height":1200,
+          "url":"https://is1-ssl.mzstatic.com/image/thumb/x.jpg/{w}x{h}bb.jpg"}}}]}
+        """.data(using: .utf8)!
+        let albums = parseLibraryAlbums(from: json)
+        XCTAssertEqual(albums.first?.artworkURL,
+                       "https://is1-ssl.mzstatic.com/image/thumb/x.jpg/{w}x{h}bb.jpg")
+    }
+
+    func testParseLibraryAlbumsMissingArtworkIsNil() {
+        let json = """
+        {"data":[{"id":"l.2","attributes":{"name":"X","artistName":"Y","trackCount":3}}]}
+        """.data(using: .utf8)!
+        XCTAssertNil(parseLibraryAlbums(from: json).first?.artworkURL)
+    }
 }
