@@ -2,7 +2,7 @@
 import Foundation
 
 enum SceneID: Equatable {
-    case nowPlaying, playlists, speakers, search, library, queue
+    case nowPlaying, playlists, speakers, search, library, queue, radio
 }
 
 /// Navigation state for the shell: a back stack of scene ids. Top-level tab

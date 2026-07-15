@@ -16,7 +16,7 @@ func runShell() {
 
     let router = Router(root: .nowPlaying)
     var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions, kittyEnabled: kittyEnabled)]
-    let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists"), (.speakers, "Speakers"), (.library, "Library")]
+    let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists"), (.speakers, "Speakers"), (.library, "Library"), (.radio, "Radio")]
 
     // Scene switches must delete every kitty placement (data stays
     // transmitted, d=a) and let each built scene reset its own placement-
@@ -85,6 +85,11 @@ func runShell() {
                                      status: status,
                                      actions: actions,
                                      kittyEnabled: kittyEnabled)
+            scenes[id] = scene
+            return scene
+        case .radio:
+            // makeCatalog() already returns nil with no developer token.
+            let scene = RadioScene(store: StationStore(), catalog: makeCatalog())
             scenes[id] = scene
             return scene
         default:
@@ -171,7 +176,7 @@ func runShell() {
                 out += "\(color)\(truncText(t.text, to: max(1, frame.width - 4)))\(ANSICode.reset)"
             } else {
                 let globals = "Space \u{23EF}  < > Skip  z Reshuffle  +/\u{2212} Vol"
-                out += "\(ANSICode.dim)1/2/3/4 Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
+                out += "\(ANSICode.dim)1-\(tabs.count) Tabs   \(scene.footerHint)   \(globals)  q Quit\(ANSICode.reset)"
             }
             // Synchronized output (terminals that don't support it ignore the
             // escapes): the clear-then-paint inside one frame can't tear.
