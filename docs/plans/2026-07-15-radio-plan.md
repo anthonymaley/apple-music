@@ -105,7 +105,7 @@ The AppleScript payload today is `track|artist|album|duration|position|state|spe
 ```swift
 // Tests/MusicTests/NowParseTests.swift
 import XCTest
-@testable import musicPackage
+@testable import music
 
 final class NowParseTests: XCTestCase {
     func testStopped() {
@@ -452,7 +452,7 @@ Then bump the patch version in all four locations (`.claude-plugin/plugin.json`,
 ```swift
 // Tests/MusicTests/StationPlaybackTests.swift
 import XCTest
-@testable import musicPackage
+@testable import music
 
 final class StationPlaybackTests: XCTestCase {
     func testRewritesHttpsToMusicScheme() {
@@ -631,7 +631,7 @@ git commit -m "feat(radio): StationPlayback — music:// scheme rewrite behind a
 ```swift
 // Tests/MusicTests/StationStoreTests.swift
 import XCTest
-@testable import musicPackage
+@testable import music
 
 final class StationStoreTests: XCTestCase {
     private var tmp: String!
@@ -824,7 +824,7 @@ There is **no browse-all** (`400`) and **no genre browse** (a station-genre is a
 ```swift
 // Tests/MusicTests/RadioCatalogTests.swift
 import XCTest
-@testable import musicPackage
+@testable import music
 
 final class RadioCatalogTests: XCTestCase {
     /// Verbatim shape from the live probe (2026-07-15).
@@ -1066,7 +1066,7 @@ Mirrors `LibraryNav` (`Sources/TUI/LibraryNav.swift`) minus the drill stack — 
 ```swift
 // Tests/MusicTests/RadioNavTests.swift
 import XCTest
-@testable import musicPackage
+@testable import music
 
 final class RadioNavTests: XCTestCase {
     private func sel(_ id: String) -> Station {
