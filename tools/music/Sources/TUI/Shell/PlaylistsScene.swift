@@ -60,12 +60,19 @@ final class PlaylistsScene: Scene {
     private var artMapInbox: [String: (id: String, url: String)]? = nil
     private var artMapStarted = false
     private var artDirty = false
+    private let kittyEnabled: Bool
+    // Placement-dedup (render-thread-only, per design doc Feature 2 §3): the
+    // last kitty placement this scene emitted, so an unchanged frame emits
+    // nothing (the placement persists on screen across text repaints) and a
+    // changed one deletes the old placement before drawing the new one.
+    private var lastPlaced: (id: UInt32, row: Int, col: Int)? = nil
 
     private let metaCol = 6
 
     init(backend: AppleScriptBackend, playlists: [String], subscriptionNames: Set<String> = [],
          sources: PlaylistDataSources,
-         appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
+         appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner,
+         kittyEnabled: Bool = false) {
         self.backend = backend
         self.playlists = playlists
         self.subscriptionNames = subscriptionNames
@@ -73,6 +80,7 @@ final class PlaylistsScene: Scene {
         self.appQueue = appQueue
         self.status = status
         self.actions = actions
+        self.kittyEnabled = kittyEnabled
         self.meta = playlists.map { PlaylistMeta(name: $0) }
         // Seed the rail from the on-disk cache so it paints fully on first frame;
         // a background pass then refreshes every playlist and rewrites the cache.
@@ -88,6 +96,8 @@ final class PlaylistsScene: Scene {
         }
         startBackgroundRefresh()
     }
+
+    func artPlacementsInvalidated() { lastPlaced = nil }
 
     /// Refresh every playlist's metadata off the main thread (so render never
     /// blocks on AppleScript), posting results to `inbox` and rewriting the cache.
@@ -458,28 +468,52 @@ final class PlaylistsScene: Scene {
         // row-reservation discipline as NowPlayingScene's left pane).
         let gw = min(44, z.heroWidth)
         let gh = max(0, min(22, bodyBottom - y - 4))
-        var artLines: [String]? = nil
+        var artBlock: ArtBlock? = nil
         if let entry = artMap[title.lowercased().trimmingCharacters(in: .whitespaces)] {
-            artLines = artwork.lines(key: entry.id,
+            artBlock = artwork.block(key: entry.id,
                                      url: ArtworkStore.resolveURL(entry.url, width: 300, height: 300),
-                                     width: gw, height: gh) { [weak self] in
+                                     // Degenerate geometry (very short/narrow terminal) skips the
+                                     // kitty path: PNG conversion doesn't depend on gw/gh, so
+                                     // without this it would still return .kitty and place a
+                                     // zero-row image — route through .lines([]) instead, which
+                                     // already no-ops cleanly at gh<=0.
+                                     width: gw, height: gh, kitty: kittyEnabled && gw > 0 && gh > 0) { [weak self] in
                 guard let self else { return }
                 self.inboxLock.lock(); self.artDirty = true; self.inboxLock.unlock()
             }
         }
-        if let art = artLines {
+        switch artBlock {
+        case .lines(let art):
+            if let last = lastPlaced { out += kittyDeleteEscape(id: last.id); lastPlaced = nil }
             let blank = String(repeating: " ", count: gw)
             let rows = art.prefix(gh) + Array(repeating: blank, count: max(0, gh - art.count))
             for line in rows {
                 out += ANSICode.moveTo(row: y, col: z.heroX) + line + ANSICode.reset
                 y += 1
             }
-        } else {
-            let block = gradientBlock(name: m.name, width: gw, height: gh)
+        case .kitty(let id, let transmit):
+            let current = (id: id, row: y, col: z.heroX)
+            if let last = lastPlaced, last == current {
+                // Unchanged: the placement from a prior frame is still on
+                // screen — emit nothing (spaces would flicker under the image).
+            } else {
+                if let last = lastPlaced { out += kittyDeleteEscape(id: last.id) }
+                let blank = String(repeating: " ", count: gw)
+                for i in 0..<gh {
+                    out += ANSICode.moveTo(row: y + i, col: z.heroX) + blank
+                }
+                out += transmit ?? ""
+                out += ANSICode.moveTo(row: y, col: z.heroX) + kittyPlaceEscape(id: id, cols: gw, rows: gh)
+                lastPlaced = current
+            }
+            y += gh
+        case .none:
+            if let last = lastPlaced { out += kittyDeleteEscape(id: last.id); lastPlaced = nil }
+            let gradient = gradientBlock(name: m.name, width: gw, height: gh)
             var seed = 0; for b in m.name.unicodeScalars { seed = (seed &* 31 &+ Int(b.value)) & 0xffffff }
             let r = 80 + (seed & 0x7f), g = 80 + ((seed >> 8) & 0x7f), bl = 80 + ((seed >> 16) & 0x7f)
             let color = "\u{1B}[38;2;\(r);\(g);\(bl)m"
-            for line in block {
+            for line in gradient {
                 out += ANSICode.moveTo(row: y, col: z.heroX) + "\(color)\(line)\(ANSICode.reset)"
                 y += 1
             }

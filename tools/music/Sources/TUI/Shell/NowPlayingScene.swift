@@ -70,11 +70,45 @@ final class NowPlayingScene: Scene {
     private var geniusActive = false
     private var geniusTriggeredAt = Date.distantPast
 
-    init(backend: AppleScriptBackend, appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner) {
+    private let kittyEnabled: Bool
+    // Placement-dedup (render-thread-only, per design doc Feature 2 §3): the
+    // last kitty placement this scene emitted, so an unchanged frame emits
+    // nothing (the placement persists on screen across text repaints) and a
+    // changed one deletes the old placement before drawing the new one.
+    private var lastPlaced: (id: UInt32, row: Int, col: Int)? = nil
+    // Scene-local, render-thread-only: id -> transmit escape, resolved on
+    // first sight of an id (file read + PNG conversion) and reused on every
+    // later sighting of the same id. A resolved failure caches `nil` so a
+    // broken file isn't re-read every frame; `transmitCache[id]` absent means
+    // "never attempted" (see kittyTransmitFor's `if let` unwrap of the outer
+    // Optional for how this collapses cleanly to a single `String?`).
+    private var transmitCache: [UInt32: String?] = [:]
+
+    init(backend: AppleScriptBackend, appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner,
+         kittyEnabled: Bool = false) {
         self.backend = backend
         self.appQueue = appQueue
         self.status = status
         self.actions = actions
+        self.kittyEnabled = kittyEnabled
+    }
+
+    func artPlacementsInvalidated() { lastPlaced = nil }
+
+    /// Resolve (and cache) the transmit escape for `id`, reading `path` and
+    /// converting to PNG only the first time this id is ever seen. nil means
+    /// "no kitty art for this id" (missing/unreadable file, or PNG conversion
+    /// failure) — cached so a broken file isn't re-read every frame.
+    private func kittyTransmitFor(id: UInt32, path: String) -> String? {
+        if let cached = transmitCache[id] { return cached }
+        guard let data = FileManager.default.contents(atPath: path),
+              let png = imageDataToPNG(data) else {
+            transmitCache.updateValue(nil, forKey: id)   // cache the failure (not a dictionary removal)
+            return nil
+        }
+        let escape = kittyTransmitEscape(id: id, png: png)
+        transmitCache[id] = escape
+        return escape
     }
 
     // Once the user acts on an auto-detected queue-end, remember which one (by its
@@ -161,11 +195,18 @@ final class NowPlayingScene: Scene {
         }
         guard frame.bodyHeight > 4, frame.width > 30 else { return out }
 
+        // Neither branch below draws the kitty art path (that lives in the
+        // main render further down) — but sharp edge #4 ("images outlive
+        // text") applies here too: dropping into the menu or the empty state
+        // changes the displayed cover, so a placement from a prior frame must
+        // be explicitly deleted or it keeps floating over this content.
         if menuActive(snapshot) {
+            if let last = lastPlaced { out += kittyDeleteEscape(id: last.id); lastPlaced = nil }
             return renderContinuationMenu(frame: frame, snapshot: snapshot, into: out)
         }
 
         guard case .active(let np) = snapshot.outcome else {
+            if let last = lastPlaced { out += kittyDeleteEscape(id: last.id); lastPlaced = nil }
             // The empty state is the on-ramp, not a dead end.
             out += ANSICode.moveTo(row: frame.bodyY + 1, col: 3)
             out += "\(ANSICode.dim)Nothing playing \u{2014} press \(ANSICode.reset)2\(ANSICode.dim) to browse playlists, \(ANSICode.reset)z\(ANSICode.dim) to shuffle.\(ANSICode.reset)"
@@ -185,8 +226,36 @@ final class NowPlayingScene: Scene {
         let artLines = frame.width >= 52 ? snapshot.artLines : []
         // Reserve room below the art for metadata (~7 rows) + the control grid (~6).
         let artRows = min(artLines.count, max(0, frame.bodyHeight - 13))
-        for i in 0..<artRows {
-            out += ANSICode.moveTo(row: frame.bodyY + i, col: leftX) + "\(artLines[i])\(ANSICode.reset)"
+        let gw = 44   // same cell rect the lines path uses (extraction is fixed at 44x22)
+        var kittyID: UInt32? = nil
+        var kittyTransmit: String? = nil
+        if kittyEnabled, frame.width >= 52, artRows > 0, let path = snapshot.artPath {
+            let id = kittyImageID(forKey: path + np.track)
+            if let escape = kittyTransmitFor(id: id, path: path) {
+                kittyID = id
+                kittyTransmit = escape
+            }
+        }
+        if let id = kittyID {
+            let current = (id: id, row: frame.bodyY, col: leftX)
+            if let last = lastPlaced, last == current {
+                // Unchanged: the placement from a prior frame is still on
+                // screen — emit nothing (spaces would flicker under the image).
+            } else {
+                if let last = lastPlaced { out += kittyDeleteEscape(id: last.id) }
+                let blank = String(repeating: " ", count: gw)
+                for i in 0..<artRows {
+                    out += ANSICode.moveTo(row: frame.bodyY + i, col: leftX) + blank
+                }
+                out += kittyTransmit ?? ""
+                out += ANSICode.moveTo(row: frame.bodyY, col: leftX) + kittyPlaceEscape(id: id, cols: gw, rows: artRows)
+                lastPlaced = current
+            }
+        } else {
+            if let last = lastPlaced { out += kittyDeleteEscape(id: last.id); lastPlaced = nil }
+            for i in 0..<artRows {
+                out += ANSICode.moveTo(row: frame.bodyY + i, col: leftX) + "\(artLines[i])\(ANSICode.reset)"
+            }
         }
 
         // --- Left pane: metadata below the art ---

@@ -10,6 +10,7 @@ struct NowPlayingSnapshot {
     var surrounding: [TrackListEntry]      // playback-context window (current playlist/album)
     var contextName: String = ""           // name of the current playlist/album
     var artLines: [String] = []            // current track album art, rendered
+    var artPath: String? = nil             // current track album art, raw file (kitty path; nil when unset/cleared)
     var queueEnded: Bool = false           // show the continuation card menu
     var endedPlaylist: String = ""         // playlist that just ended
     var endedTrack: String = ""            // last context track title (seed for Radio/Similar)

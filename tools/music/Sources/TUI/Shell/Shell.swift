@@ -10,10 +10,25 @@ func runShell() {
     let volumeDelta = DeltaAccumulator()
     let poller = PlaybackPoller(store: store, backend: backend, appQueue: appQueue)
     let terminal = TerminalState.shared
+    // Computed once (env-based, no stdin response parsing — design doc sharp
+    // edge #5) and threaded into every art-rendering scene.
+    let kittyEnabled = kittyGraphicsSupported(env: ProcessInfo.processInfo.environment)
 
     let router = Router(root: .nowPlaying)
-    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions)]
+    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions, kittyEnabled: kittyEnabled)]
     let tabs: [(id: SceneID, title: String)] = [(.nowPlaying, "Now"), (.playlists, "Playlists"), (.speakers, "Speakers"), (.library, "Library")]
+
+    // Scene switches must delete every kitty placement (data stays
+    // transmitted, d=a) and let each built scene reset its own placement-
+    // dedup state, or the outgoing scene's cover keeps floating over the
+    // incoming scene's content (design doc sharp edge #4: "images outlive
+    // text"). Called after every router mutation below.
+    func invalidateArtOnSwitch() {
+        guard kittyEnabled else { return }
+        print(kittyDeletePlacementsEscape(), terminator: "")
+        fflush(stdout)
+        for scene in scenes.values { scene.artPlacementsInvalidated() }
+    }
 
     // Lazily build a scene the first time it's shown. Returns nil if it can't be
     // built (e.g. no playlists), so the caller can refuse the switch.
@@ -40,7 +55,8 @@ func runShell() {
                                        sources: makePlaylistDataSources(backend: backend, names: names, artworkAPI: artworkAPI),
                                        appQueue: appQueue,
                                        status: status,
-                                       actions: actions)
+                                       actions: actions,
+                                       kittyEnabled: kittyEnabled)
             scenes[id] = scene
             return scene
         case .speakers:
@@ -67,7 +83,8 @@ func runShell() {
                                      sources: makeLibraryDataSources(api: api, backend: backend),
                                      appQueue: appQueue,
                                      status: status,
-                                     actions: actions)
+                                     actions: actions,
+                                     kittyEnabled: kittyEnabled)
             scenes[id] = scene
             return scene
         default:
@@ -79,7 +96,7 @@ func runShell() {
     func switchOrExplain(_ id: SceneID) {
         // Each ensureScene refusal owns its toast (Playlists: "No playlists found.";
         // Library: "Sign in…"), so there is no generic cross-tab fallback here.
-        if ensureScene(id) != nil { router.switchTo(id) }
+        if ensureScene(id) != nil { router.switchTo(id); invalidateArtOnSwitch() }
     }
 
     terminal.enterRawMode()
@@ -90,6 +107,12 @@ func runShell() {
     DispatchQueue.global().async { sweepQueuePlaylists(backend: backend) }
     defer {
         poller.stop()
+        // Free every transmitted image, alongside the terminal restore below,
+        // so no image ghosts survive into scrollback (design doc sharp edge #4).
+        if kittyEnabled {
+            print(kittyDeleteAllEscape(), terminator: "")
+            fflush(stdout)
+        }
         terminal.exitRawMode()
     }
 
@@ -164,8 +187,8 @@ func runShell() {
         if !shellShouldResolveGlobals(forSceneCapturing: scene.capturesAllInput) {
             switch scene.handle(key) {
             case .none, .redraw: break
-            case .push(let id): router.push(id)
-            case .pop: router.pop()
+            case .push(let id): router.push(id); invalidateArtOnSwitch()
+            case .pop: router.pop(); invalidateArtOnSwitch()
             case .quit: return
             }
             continue
@@ -227,8 +250,8 @@ func runShell() {
         //    Esc means an internal back (.redraw) or leaving the scene (.pop).
         switch scene.handle(key) {
         case .none, .redraw: break
-        case .push(let id): router.push(id)
-        case .pop: router.pop()
+        case .push(let id): router.push(id); invalidateArtOnSwitch()
+        case .pop: router.pop(); invalidateArtOnSwitch()
         case .quit: return
         }
     }

@@ -39,11 +39,20 @@ protocol Scene: AnyObject {
     /// Short scene-specific key hints for the shell footer (the shell appends the
     /// global playback keys). Empty by default.
     var footerHint: String { get }
+
+    /// Called right after the shell clears every kitty placement on a scene
+    /// switch (`kittyDeletePlacementsEscape`, d=a — placements only, data
+    /// stays transmitted). Art-rendering scenes reset their placement-dedup
+    /// state (`lastPlaced = nil`) so the next render re-places instead of
+    /// assuming a placement the shell just deleted is still on screen. Default
+    /// no-op for scenes with no art.
+    func artPlacementsInvalidated()
 }
 
 extension Scene {
     var capturesAllInput: Bool { false }
     var footerHint: String { "" }
+    func artPlacementsInvalidated() {}
 }
 
 /// Pure decision: should the shell resolve global/navigation keys for the

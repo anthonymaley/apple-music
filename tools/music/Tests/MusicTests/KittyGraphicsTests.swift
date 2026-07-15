@@ -183,6 +183,23 @@ final class KittyGraphicsTests: XCTestCase {
         XCTAssertTrue(frame.controls.contains("d=A"))
         XCTAssertTrue(frame.controls.contains("q=2"))
     }
+
+    // MARK: - kittyDeletePlacementsEscape
+
+    func testDeletePlacementsEscapeDeletesAllPlacementsWithoutFreeingData() {
+        // Lowercase d=a: delete every placement (unscoped by id) but keep the
+        // stored image data — used on scene switches so the incoming scene
+        // can re-place without re-transmitting.
+        let escape = kittyDeletePlacementsEscape()
+        let frames = splitKittyEscapes(escape)
+        XCTAssertEqual(frames.count, 1)
+        guard let frame = frames.first else { return }
+        XCTAssertTrue(frame.controls.contains("a=d"))
+        XCTAssertTrue(frame.controls.contains("d=a"))
+        XCTAssertTrue(frame.controls.contains("q=2"))
+        XCTAssertFalse(frame.controls.contains("d=A"))
+        XCTAssertFalse(frame.controls.contains("d=i"))
+    }
 }
 
 // MARK: - Test helpers

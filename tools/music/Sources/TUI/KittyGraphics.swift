@@ -122,3 +122,13 @@ func kittyDeleteEscape(id: UInt32) -> String {
 func kittyDeleteAllEscape() -> String {
     "\u{1B}_Ga=d,d=A,q=2\u{1B}\\"
 }
+
+/// Delete ALL placements but keep transmitted data (`d=a`, lowercase and
+/// unscoped by id — the spec's lowercase variants never free stored image
+/// data). Used on scene switches: the shell prints this once, then every art
+/// scene resets its placement-dedup state (`artPlacementsInvalidated()`), so
+/// the incoming scene re-places its cover without re-transmitting bytes the
+/// terminal already has.
+func kittyDeletePlacementsEscape() -> String {
+    "\u{1B}_Ga=d,d=a,q=2\u{1B}\\"
+}

@@ -33,6 +33,10 @@ final class PlaybackPoller {
     private var surrounding: [TrackListEntry] = []
     private var contextName = ""
     private var artLines: [String] = []
+    // Raw temp-file path backing `artLines` (extractArtwork()'s fixed path),
+    // kept alongside it for the Now tab's kitty-graphics path — set/cleared at
+    // the same sites as artLines, nil whenever artLines is genuinely empty.
+    private var artPath: String? = nil
     private var lastContext: ContextQueue? = nil
     private var qEnded = false
     private var endedPlaylist = ""
@@ -87,7 +91,7 @@ final class PlaybackPoller {
     private func snapshot(outcome: PollOutcome) -> NowPlayingSnapshot {
         NowPlayingSnapshot(
             outcome: outcome, history: history, surrounding: surrounding,
-            contextName: contextName, artLines: artLines,
+            contextName: contextName, artLines: artLines, artPath: artPath,
             queueEnded: qEnded, endedPlaylist: endedPlaylist,
             endedTrack: endedTrack, endedArtist: endedArtist, endedArtLines: endedArtLines)
     }
@@ -124,6 +128,11 @@ final class PlaybackPoller {
                 let artKey = "\(np.album)\u{0}\(np.artist)"
                 let cachedArt = artCache[artKey]
                 artLines = cachedArt ?? []
+                // A cache hit trusts the existing artPath (no fresh extraction
+                // runs below, so the temp file is unchanged); a miss clears it
+                // so the kitty path doesn't show stale bytes while the
+                // extraction below is still in flight.
+                artPath = cachedArt != nil ? artPath : nil
                 store.write(snapshot(outcome: .active(np)))
 
                 // When the app owns the queue (a playlist track was picked), the
@@ -148,7 +157,9 @@ final class PlaybackPoller {
                     }
                 }
                 if cachedArt == nil {
-                    artLines = currentTrackArtLines(width: 44, height: 22)
+                    let extracted = currentTrackArtLines(width: 44, height: 22)
+                    artLines = extracted.lines
+                    artPath = extracted.path
                     if artCache.count > 64 { artCache.removeAll() }
                     artCache[artKey] = artLines
                 }
