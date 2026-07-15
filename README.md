@@ -333,6 +333,8 @@ Run bare `music` in a real terminal (not inside Claude Code — TUI requires a T
 | Key | Action |
 |-----|--------|
 | `1`/`2`/`3`/`4` | Jump to Now / Playlists / Speakers / Library tab |
+| `j`/`k`/`h`/`l` | Vim aliases for ↓ ↑ ← → (`l`/`g`/`G` stay love/Genius on Now) |
+| `g`/`G`, `ctrl-d`/`ctrl-u` | Top / bottom, half-page jumps in list tabs |
 | `Tab` / `Shift-Tab` | Cycle tabs forward / backward |
 | `Space` | Play/pause |
 | `<` / `>` | Previous / next track (full up/down through the playlist) |
@@ -367,7 +369,7 @@ Under the track progress is a **control grid** (Shuffle / Order / Repeat / Geniu
 
 ![Speaker Picker](media/speakers.png)
 
-**Library tab** (needs the Apple Music user token) — browse your library in three sub-views, **Artists · Albums · Songs** (opens on Artists), switched with `[`/`]`. `Enter` opens an album's tracks or drills Artist → their albums → tracks; `p` plays and `s` shuffles the focused item (albums/artists play as an app-owned queue — a scoped, navigable Up Next that stops at the album's end; needs Autoplay ∞ off). `/` filters as you type. On the Artists list, `a` cycles a track-count filter — **All → 12″/EP → Albums** — which cuts the bloat Apple's library-artists list carries (every artist with any library track, even one dragged in by a single playlist song) and separates 12″s/EPs from full-album deep cuts; drilling into an artist shows only that tier's albums. The first activation each session paints instantly from a cache, revalidated in the background. The focused album shows its real cover art, rendered in the terminal — fetched once, cached on disk.
+**Library tab** (needs the Apple Music user token) — browse your library in three sub-views, **Artists · Albums · Songs** (opens on Artists), switched with `[`/`]`. `Enter` opens an album's tracks or drills Artist → their albums → tracks; `p` plays and `s` shuffles the focused item (albums/artists play as an app-owned queue — a scoped, navigable Up Next that stops at the album's end; needs Autoplay ∞ off). `/` filters as you type. On the Artists list, `a` cycles a track-count filter — **All → 12″/EP → Albums** — which cuts the bloat Apple's library-artists list carries (every artist with any library track, even one dragged in by a single playlist song) and separates 12″s/EPs from full-album deep cuts; drilling into an artist shows only that tier's albums. The first activation each session paints instantly from a cache, revalidated in the background. The focused album shows its real cover art — true pixels on kitty-protocol terminals (iTerm2 3.5+, Kitty, WezTerm, Ghostty), chafa half-blocks elsewhere; fetched once, cached on disk.
 
 ## Status Line
 
