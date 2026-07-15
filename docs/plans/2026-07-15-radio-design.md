@@ -176,11 +176,15 @@ Fix: when the current track is a `URL track` **and** `duration` is
 `missing value`, emit a live-station shape rather than choking:
 
 ```json
-{"live": true, "station": "BBC Radio 1", "state": "playing", "speakers": [...]}
+{"live": true, "track": "Okayyy (feat. Doja Cat)", "artist": "Latto",
+ "album": "Big Mama", "state": "playing", "speakers": [{"name":"Kitchen","volume":56}]}
 ```
 
-No `duration`/`position` keys — absent, not zero, because zero is a lie.
-`statusline.sh` renders the station name with a LIVE marker. Fix at the source,
+Same keys as a normal response, minus `duration`/`position` — **absent, not zero**,
+because zero is a lie about a livestream. There is deliberately no `station` field:
+`name of current track` is the *song* on Apple's own live stations and the *station*
+only on third-party ones, so any "station name" would be wrong half the time.
+`statusline.sh` reads `live` to show a LIVE marker. Fix at the source,
 not defensively in bash.
 
 ## Error handling
