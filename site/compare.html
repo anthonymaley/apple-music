@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apple Music terminal apps compared: musictui vs the field</title>
+<meta name="description" content="An honest comparison of Apple Music TUI and CLI projects for the terminal: musictui, Apple-Music-CLI-Player, apple-music-tui (Rust and npm), lazyAppleMusic, and applemusic-cli.">
+<link rel="canonical" href="https://musictui.com/compare.html">
+<meta property="og:title" content="Apple Music terminal apps compared: musictui vs the field">
+<meta property="og:description" content="An honest comparison of Apple Music TUI and CLI projects for the terminal, feature by feature.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://musictui.com/compare.html">
+<meta property="og:image" content="https://musictui.com/assets/og.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230a0d12'/%3E%3Ctext x='50' y='68' font-family='monospace' font-size='56' fill='%233fe07a' text-anchor='middle'%3E%E2%99%AB%3C/text%3E%3C/svg%3E">
+<style>
+@font-face{
+  font-family:'JetBrains Mono';
+  font-style:normal;
+  font-weight:400 800;
+  font-display:swap;
+  src:url("assets/fonts/jbmono-var.woff2") format('woff2');
+}
+:root{--bg:#0a0d12;--bg2:#0e131a;--panel:#0d1218;--panel2:#111823;--line:#1b2430;--text:#d6dde5;--muted:#8a94a0;--dim:#586471;--cyan:#5cd6e0;--accent:#3fe07a;}
+*{box-sizing:border-box;}
+body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;-webkit-font-smoothing:antialiased;}
+a{color:var(--cyan);text-decoration:none;transition:color .15s;}
+a:hover{color:var(--accent);}
+::selection{background:rgba(63,224,122,.22);color:#fff;}
+.wrap{max-width:1180px;margin:0 auto;padding-left:26px;padding-right:26px;}
+.rule{display:flex;align-items:baseline;gap:14px;}
+.rule h2{margin:0;font-size:15px;color:var(--cyan);letter-spacing:.02em;font-weight:600;}
+.rule .ln{flex:1;height:1px;background:var(--line);}
+.dots{display:flex;align-items:center;gap:8px;}
+.dots span{width:11px;height:11px;border-radius:50%;display:inline-block;}
+.d1{background:#ff5f56;}.d2{background:#ffbd2e;}.d3{background:#27c93f;}
+.ghbtn{display:inline-flex;align-items:center;gap:7px;color:var(--text);border:1px solid var(--line);background:var(--panel2);padding:7px 13px;border-radius:8px;transition:border-color .15s,color .15s;}
+.ghbtn:hover{border-color:var(--accent);color:var(--accent);}
+p{font-size:15px;line-height:1.65;color:var(--muted);max-width:760px;}
+p strong{color:var(--text);}
+.tablewrap{border:1px solid var(--line);border-radius:12px;overflow-x:auto;margin:28px 0;}
+table{border-collapse:collapse;min-width:900px;width:100%;font-size:13px;}
+th{background:var(--panel2);color:var(--muted);font-weight:600;text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);font-size:12.5px;}
+th:first-child{min-width:210px;}
+td{padding:11px 14px;border-top:1px solid var(--line);background:var(--panel);color:var(--muted);vertical-align:top;}
+td:first-child{color:var(--text);}
+.yes{color:var(--accent);}
+.no{color:var(--dim);}
+.part{color:#ffbd2e;}
+.profile{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:20px 22px;margin:14px 0;}
+.profile h3{margin:0 0 8px;font-size:15px;color:#fff;}
+.profile p{margin:0;font-size:13.5px;max-width:none;}
+footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;padding:34px 4px 6px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);margin-top:44px;}
+</style>
+</head>
+<body>
+<div style="position:relative;min-height:100vh;background:radial-gradient(1200px 620px at 78% -8%, rgba(92,214,224,.07), transparent 60%), radial-gradient(1000px 560px at 8% 12%, rgba(63,224,122,.055), transparent 62%), var(--bg);">
+
+  <header style="position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);background:rgba(10,13,18,.82);border-bottom:1px solid var(--line);">
+    <div class="wrap" style="padding-top:11px;padding-bottom:11px;display:flex;align-items:center;gap:18px;">
+      <div class="dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+      <div style="color:var(--muted);font-size:13px;"><a href="/" style="color:var(--cyan);">♫ music</a> <span style="color:var(--dim);">— compare</span></div>
+      <nav style="margin-left:auto;display:flex;align-items:center;gap:22px;font-size:13.5px;">
+        <a href="/" style="color:var(--muted);">home</a>
+        <a class="ghbtn" href="https://github.com/anthonymaley/musictui">GitHub <span style="color:var(--dim);">↗</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="wrap" style="padding-top:56px;padding-bottom:20px;">
+    <h1 style="margin:0 0 18px;font-size:34px;line-height:1.15;font-weight:800;letter-spacing:-.01em;color:#fff;max-width:820px;">Apple Music in the terminal: how the projects actually compare</h1>
+    <p>There are a handful of ways to control Apple Music from a terminal, and they make very different trade-offs. This page compares them feature by feature. The claims about other projects come from their own READMEs as of July 2026, with links so you can check; if something here is out of date, <a href="https://github.com/anthonymaley/musictui/issues">open an issue</a> and it gets fixed.</p>
+    <p>The short version: most projects in this space are transport wrappers. Play, pause, skip, volume, sometimes a search. That's genuinely useful and some do it with real charm. musictui's bet is different: it treats the terminal as a full Apple Music client, with a tabbed TUI, multi-room AirPlay that verifies its routes against actual network sessions, library browsing with real cover art, playlist management, an equalizer, and a natural-language layer for Claude Code.</p>
+  </section>
+
+  <section class="wrap" style="padding-bottom:30px;">
+    <div class="rule" style="margin-bottom:6px;"><h2>♫ Feature by feature</h2><div class="ln"></div></div>
+    <div class="tablewrap">
+      <table>
+        <tr>
+          <th>Feature</th>
+          <th>musictui</th>
+          <th><a href="https://github.com/mcthomas/Apple-Music-CLI-Player">Apple-Music-CLI-Player</a></th>
+          <th><a href="https://github.com/ori0o0p/apple-music-tui">apple-music-tui (Rust)</a></th>
+          <th><a href="https://github.com/Mabylife/apple-music-tui">apple-music-tui (npm)</a></th>
+          <th><a href="https://github.com/limiu82214/lazyAppleMusic">lazyAppleMusic</a></th>
+          <th><a href="https://github.com/wiedymi/applemusic-cli">applemusic-cli</a></th>
+        </tr>
+        <tr><td>Interface</td><td>Tabbed TUI + CLI + Claude Code skill</td><td>CLI + now-playing widget</td><td>TUI</td><td>TUI</td><td>TUI</td><td>CLI only</td></tr>
+        <tr><td>Backend</td><td>Native Music.app (AppleScript + Apple Music API)</td><td>Native Music.app (AppleScript)</td><td>Native Music.app (JXA)</td><td class="part">Requires Cider running as backend player</td><td>Native Music.app</td><td>Native Music.app (AppleScript)</td></tr>
+        <tr><td>Playback / transport</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Multi-room AirPlay with per-speaker volume</td><td class="yes">✓ verified against live network sessions, self-healing</td><td class="part">toggle snippet for one output</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+        <tr><td>Album art in terminal</td><td class="yes">✓ Now, Library, and Playlists panes (chafa half-blocks)</td><td class="yes">✓ widget (Viu)</td><td class="yes">✓ (iTerm2/Kitty/WezTerm graphics)</td><td class="no">not stated</td><td class="no">—</td><td class="no">—</td></tr>
+        <tr><td>Library browsing (artists / albums / songs)</td><td class="yes">✓ with 12″/EP-vs-album filter and album-scoped queues</td><td class="part">list by artist/album/playlist/genre</td><td class="no">—</td><td class="no">—</td><td class="part">playlists only</td><td class="part">local tracks only</td></tr>
+        <tr><td>Catalog search (full Apple Music)</td><td class="yes">✓ catalog + your library, numbered replayable results</td><td class="no">local library</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">—</td><td class="no">local only</td></tr>
+        <tr><td>Playlist create / edit / share</td><td class="yes">✓ incl. iMessage &amp; email share, temp playlists</td><td class="no">play only</td><td class="no">—</td><td class="part">search/play</td><td class="part">browse/play</td><td class="part">browse/play</td></tr>
+        <tr><td>Discovery (similar, new releases, mixes, heavy rotation)</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td><td class="part">radio stations</td><td class="no">—</td><td class="no">—</td></tr>
+        <tr><td>Equalizer</td><td class="yes">✓ eight venue presets written into Music.app</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+        <tr><td>Natural-language control (LLM)</td><td class="yes">✓ Claude Code plugin, /music skill</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+        <tr><td>Test suite</td><td class="yes">258 tests</td><td class="no">—</td><td class="no">not stated</td><td class="no">not stated</td><td class="no">not stated</td><td class="no">—</td></tr>
+        <tr><td>Language</td><td>Swift</td><td>Shell + AppleScript</td><td>Rust</td><td>TypeScript</td><td>Go</td><td>TypeScript</td></tr>
+        <tr><td>Extra requirements</td><td>Swift 5.9+ to build; Apple Developer account only for search/library/discovery</td><td>Viu, fzf</td><td>Rust 1.70+</td><td>Cider (paid app), Node</td><td>Go toolchain</td><td>Node</td></tr>
+      </table>
+    </div>
+    <p style="font-size:12.5px;color:var(--dim);">Feature rows for other projects reflect their READMEs as of July 2026. Star counts and activity change; check the linked repos for current state.</p>
+  </section>
+
+  <section class="wrap" style="padding-bottom:30px;">
+    <div class="rule" style="margin-bottom:16px;"><h2>♫ The field, fairly</h2><div class="ln"></div></div>
+
+    <div class="profile">
+      <h3><a href="https://github.com/mcthomas/Apple-Music-CLI-Player">Apple-Music-CLI-Player</a> — the incumbent</h3>
+      <p>The most established project here (~170+ stars) and the lightest: a shell script you can read in one sitting, with a charming now-playing widget and fzf-driven fuzzy playback. If you want zero build steps and transport with taste, it's a fine choice. It doesn't try to be a client: no catalog search, no playlist management, one-output AirPlay via an optional snippet.</p>
+    </div>
+    <div class="profile">
+      <h3><a href="https://github.com/ori0o0p/apple-music-tui">apple-music-tui (Rust)</a> — the prettiest renderer</h3>
+      <p>A Rust remote controller with vim keys and genuinely nice artwork rendering: it uses the iTerm2/Kitty/WezTerm graphics protocols, which draw sharper images than half-block characters on supported terminals. Scope is playback, volume, progress, and search. Early days (no stars yet at the time of writing), worth watching.</p>
+    </div>
+    <div class="profile">
+      <h3><a href="https://github.com/Mabylife/apple-music-tui">apple-music-tui (npm)</a> — the Cider route</h3>
+      <p>A TypeScript TUI that drives <a href="https://cider.sh">Cider</a> rather than Music.app, which means Cider must be installed and running as the actual player. Full transport, search, and radio stations; self-described as in active development with bugs and missing features. If you already live in Cider, this fits; if you want the native Music.app (and your AirPlay groups), it's a second app in the chain.</p>
+    </div>
+    <div class="profile">
+      <h3><a href="https://github.com/limiu82214/lazyAppleMusic">lazyAppleMusic</a> and <a href="https://github.com/wiedymi/applemusic-cli">applemusic-cli</a> — early sketches</h3>
+      <p>A Go/Bubble Tea TUI with playlist browsing and a known-issues list, and a single-commit TypeScript CLI for transport and local search. Both are honest early-stage projects, not daily drivers yet.</p>
+    </div>
+  </section>
+
+  <section class="wrap" style="padding-bottom:30px;">
+    <div class="rule" style="margin-bottom:16px;"><h2>♫ Where musictui is behind</h2><div class="ln"></div></div>
+    <p>Fairness cuts both ways. musictui is macOS-only by design (it drives the real Music.app, which is the point, but the Cider-based TUI can reach further). Its artwork uses chafa half-blocks, not the Kitty/iTerm2 graphics protocols, so the Rust project draws sharper images on terminals that support them. And catalog search, playlist CRUD via API, and discovery need an Apple Developer account ($99/yr), because Apple gates its API that way; playback, the TUI, AirPlay routing, and library browsing all work without it.</p>
+  </section>
+
+  <section class="wrap" style="padding-bottom:40px;">
+    <div style="border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#0d1219,#0a0e14);padding:36px 40px;text-align:center;">
+      <h2 style="margin:0 0 10px;font-size:24px;color:#fff;font-weight:800;">See it run</h2>
+      <p style="margin:0 auto 22px;max-width:520px;">The <a href="/">homepage</a> has an 80-second demo of the TUI: playlists, speakers, library, and an album playing as its own queue.</p>
+      <a class="ghbtn" href="https://github.com/anthonymaley/musictui" style="font-size:14px;padding:11px 20px;">View on GitHub ↗</a>
+    </div>
+    <footer>
+      <div><span style="color:var(--cyan);">♫</span> music <span style="color:var(--line);">·</span> anthonymaley/musictui <span style="color:var(--line);">·</span> MIT</div>
+      <div style="display:flex;gap:20px;"><a href="/" style="color:var(--muted);">musictui.com</a><a href="https://github.com/anthonymaley/musictui" style="color:var(--muted);">GitHub ↗</a></div>
+    </footer>
+  </section>
+
+</div>
+</body>
+</html>
