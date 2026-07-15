@@ -290,6 +290,11 @@ final class PlaylistsScene: Scene {
             return .redraw
         }
 
+        // Vim aliases: j/k/h/l/g/G/ctrl-d/ctrl-u. Applied here, after the raw
+        // filter-text capture above returns, so typing a playlist name
+        // containing those letters into the filter box isn't intercepted.
+        let key = vimAlias(key, listScene: true)
+
         switch key {
         case .up:
             if focus == .playlists { moveRail(by: -1) }

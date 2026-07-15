@@ -441,6 +441,31 @@ final class LibraryScene: Scene {
             return .redraw
         }
 
+        // Vim aliases: j/k/h/l/g/G/ctrl-d/ctrl-u. Applied here, after the raw
+        // filter-text capture above returns, so typing an album/artist name
+        // containing those letters into the filter box isn't intercepted.
+        let key = vimAlias(key, listScene: true)
+
+        // pageUp/pageDown/home/end aren't reducer keys (LibraryKey has no page
+        // concept) — handled directly against nav.cursor, same idiom as the
+        // filter-capture block above and the .up/.down cases in libraryReduce.
+        switch key {
+        case .pageUp:
+            nav.cursor = max(0, nav.cursor - 10)
+            return .redraw
+        case .pageDown:
+            nav.cursor = min(max(0, currentRowCount() - 1), nav.cursor + 10)
+            return .redraw
+        case .home:
+            nav.cursor = 0
+            return .redraw
+        case .end:
+            nav.cursor = max(0, currentRowCount() - 1)
+            return .redraw
+        default:
+            break
+        }
+
         let libKey: LibraryKey
         switch key {
         case .up: libKey = .up

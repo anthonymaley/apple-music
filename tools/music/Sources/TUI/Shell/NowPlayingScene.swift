@@ -346,6 +346,9 @@ final class NowPlayingScene: Scene {
     }
 
     func handle(_ key: KeyPress) -> SceneAction {
+        // Vim aliases first: j/k/h/ctrl-d/ctrl-u everywhere, but NOT l/g/G — this
+        // tab binds those to Favorite and Genius Shuffle below.
+        let key = vimAlias(key, listScene: false)
         // Continuation menu intercepts its keys when active.
         if menuShownLastFrame {
             if let action = continuationAction(for: key) {

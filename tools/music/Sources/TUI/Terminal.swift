@@ -30,7 +30,7 @@ struct ANSICode {
     }
 }
 
-enum KeyPress {
+enum KeyPress: Equatable {
     case up, down, left, right
     case pageUp, pageDown, home, end
     case shiftTab

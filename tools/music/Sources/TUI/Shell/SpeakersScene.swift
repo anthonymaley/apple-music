@@ -287,6 +287,9 @@ final class SpeakersScene: Scene {
     }
 
     func handle(_ key: KeyPress) -> SceneAction {
+        // Vim aliases: j/k/h/l/g/G/ctrl-d/ctrl-u — this scene has no raw-text
+        // capture mode, so the full list-scene set is safe everywhere.
+        let key = vimAlias(key, listScene: true)
         let displayRows = speakersDisplayRows(speakerCount: rows.count, expanded: eqExpanded,
                                               presetNames: pickerPresetNames)
         let rowCount = displayRows.count   // always ≥ 1 (EQ row always present)
