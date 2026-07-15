@@ -81,6 +81,16 @@ There are no per-action slash commands — `/music` (the skill) is the single en
 3. Choose **Add plugin**
 4. Browse and select **Apple Music**
 
+### Homebrew (CLI + TUI only)
+
+Just want the terminal client, no Claude Code plugin?
+
+```bash
+brew install anthonymaley/musictui/musictui
+```
+
+That installs the `music` binary: the TUI, playback, AirPlay routing, and volume. Add the plugin later for natural-language control.
+
 ### Build the CLI (one command, no account needed)
 
 The plugin drives the `music` CLI, so build it once after installing (Swift 5.9+, ships with Xcode):
