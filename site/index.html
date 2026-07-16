@@ -20,7 +20,7 @@
   "license": "https://github.com/anthonymaley/musictui/blob/main/LICENSE",
   "url": "https://musictui.com/",
   "downloadUrl": "https://github.com/anthonymaley/musictui",
-  "description": "An interactive TUI and CLI for Apple Music on macOS: verified multi-room AirPlay, library browsing with real cover art, a venue equalizer, and natural-language control from Claude Code.",
+  "description": "An interactive TUI and CLI for Apple Music on macOS: verified multi-room AirPlay, library browsing with real cover art, radio stations, a venue equalizer, and natural-language control from Claude Code.",
   "author": {"@type": "Person", "name": "Anthony Maley", "url": "https://github.com/anthonymaley"}
 }
 </script>
@@ -72,7 +72,7 @@ a:hover{color:var(--accent);}
 .figgrid .ft{color:#fff;font-size:14px;margin-bottom:5px;}
 .figgrid .fd{color:var(--muted);font-size:12.5px;line-height:1.5;}
 
-.featgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+.featgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
 .featgrid>div{background:var(--panel);padding:24px 22px;}
 .featgrid .fk{color:var(--accent);font-size:13px;margin-bottom:12px;}
 .featgrid .fh{color:#fff;font-size:15px;margin-bottom:8px;}
@@ -232,6 +232,7 @@ a:hover{color:var(--accent);}
       <span>▸ library browsing</span>
       <span>▸ catalog + library search</span>
       <span>▸ playlists &amp; sharing</span>
+      <span>▸ radio stations</span>
       <span>▸ venue equalizer</span>
       <span>▸ discovery &amp; mixes</span>
     </div>
@@ -255,7 +256,7 @@ a:hover{color:var(--accent);}
           <div style="font-size:15px;color:#fff;font-weight:600;">Natural language</div>
           <div style="font-size:13px;color:var(--cyan);">/music</div>
         </div>
-        <div style="color:var(--muted);font-size:13.5px;line-height:1.6;min-height:60px;">Everything in words. <span style="color:var(--text);">"Play Kid A in the kitchen and living room at 60%."</span> Playback with routing, search, playlists, discovery.</div>
+        <div style="color:var(--muted);font-size:13.5px;line-height:1.6;min-height:60px;">Everything in words. <span style="color:var(--text);">"Play Kid A in the kitchen and living room at 60%."</span> Playback with routing, search, playlists, radio, discovery.</div>
         <div style="display:flex;gap:8px;margin-top:16px;"><span class="tag">setup: build CLI</span><span class="tag dim">tokens: normal</span></div>
       </div>
       <div class="waycard">
@@ -285,6 +286,11 @@ a:hover{color:var(--accent);}
         <div class="fk">▸ verified routing</div>
         <div class="fh">Multi-room, for real</div>
         <div class="fb">Name speakers and playback routes to exactly those. Each route is then checked against a live session, not AppleScript's claim, and self-heals if it doesn't establish.</div>
+      </div>
+      <div>
+        <div class="fk">▸ radio</div>
+        <div class="fh">Stations, native</div>
+        <div class="fb">The live Apple Music lineup, your personal station, and any station you favorite by URL. Plays straight through Music.app with your AirPlay group intact, no second app in the chain.</div>
       </div>
       <div>
         <div class="fk">▸ library</div>
