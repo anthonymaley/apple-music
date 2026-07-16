@@ -9,7 +9,7 @@ import Foundation
 /// turned off), and the poller advances to the next. This restores the full
 /// up/down navigation Apple's regression took away — and is immune to it, since
 /// Music is never asked to remember a queue.
-struct AppQueue {
+struct AppQueue: Codable, Equatable {
     let playlistName: String          // source playlist, for `play track N of playlist ...`
     let tracks: [TrackListEntry]      // PLAY ORDER; each `.index` = source playlist position
     var currentIndex: Int             // 1-based position in the play order (the `tracks` array)

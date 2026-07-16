@@ -14,7 +14,7 @@ struct NowPlayingState {
     var state: String = "stopped"
 }
 
-struct TrackListEntry {
+struct TrackListEntry: Codable, Equatable {
     let index: Int
     let name: String
     let artist: String
