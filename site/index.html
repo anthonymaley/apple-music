@@ -64,12 +64,18 @@ a:hover{color:var(--accent);}
 .tag.good{color:var(--accent);border-color:rgba(63,224,122,.3);}
 .tag.dim{color:var(--dim);}
 
-.figgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;}
+.figgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:18px;}
 .figgrid figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);}
-.figgrid img{display:block;width:100%;height:260px;object-fit:cover;object-position:top left;border-bottom:1px solid var(--line);}
+.figgrid img{display:block;width:100%;object-fit:cover;object-position:top left;border-bottom:1px solid var(--line);}
 .figgrid figcaption{padding:14px 16px;}
 .figgrid .ft{color:#fff;font-size:14px;margin-bottom:5px;}
 .figgrid .fd{color:var(--muted);font-size:12.5px;line-height:1.5;}
+.fig-now{grid-column:1/-1;}
+.fig-wide{grid-column:span 4;}
+.fig-narrow{grid-column:span 2;}
+.fig-now img{height:420px;}
+.fig-med img{height:300px;}
+.fig-sm img{height:250px;}
 
 .featgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
 .featgrid>div{background:var(--panel);padding:24px 22px;}
@@ -224,23 +230,23 @@ a:hover{color:var(--accent);}
   <!-- ===== TUI TABS (screenshots) ===== -->
   <section class="wrap reveal" style="padding-top:30px;padding-bottom:40px;">
     <div class="figgrid">
-      <figure>
+      <figure class="fig-now">
         <img src="assets/tab-now.webp" alt="Now Playing tab: album art, Up Next queue, playback controls" loading="lazy">
         <figcaption><div class="ft">Now</div><div class="fd">Album art, live metadata, and the Up Next queue with a control grid for shuffle, order, repeat &amp; Genius.</div></figcaption>
       </figure>
-      <figure>
-        <img src="assets/tab-library.webp" alt="Library tab: artist drill-down with album art and track list" loading="lazy">
-        <figcaption><div class="ft">Library</div><div class="fd">Browse Artists, Albums, and Songs. Drill into an artist, filter 12″s from LPs, and play an album as its own queue that stops when the record ends.</div></figcaption>
-      </figure>
-      <figure>
+      <figure class="fig-wide fig-med">
         <img src="assets/tab-playlists.webp" alt="Playlists tab: playlist browser with live preview" loading="lazy">
         <figcaption><div class="ft">Playlists</div><div class="fd">Instant-highlight browsing, type-to-filter, and pin any playlist to Now to replay tracks while playback continues.</div></figcaption>
       </figure>
-      <figure>
+      <figure class="fig-narrow fig-med">
         <img src="assets/tab-radio.webp" alt="Radio tab: favorite stations plus the live Apple Music and BBC lineup" loading="lazy">
-        <figcaption><div class="ft">Radio</div><div class="fd">Favorite stations, the live Apple Music lineup, and your personal station. Search the catalog, or paste any station's URL when search comes up short.</div></figcaption>
+        <figcaption><div class="ft">Radio</div><div class="fd">Favorite stations, the live Apple Music lineup, your personal station. Search the catalog or paste a station URL.</div></figcaption>
       </figure>
-      <figure style="grid-column:1/-1;">
+      <figure class="fig-narrow fig-sm">
+        <img src="assets/tab-library.webp" alt="Library tab: artist drill-down with album art and track list" loading="lazy">
+        <figcaption><div class="ft">Library</div><div class="fd">Artists, Albums, Songs. Filter 12″s from LPs; an album plays as its own queue and stops at the record's end.</div></figcaption>
+      </figure>
+      <figure class="fig-wide fig-sm">
         <img src="assets/tab-speakers.webp" alt="Speakers tab: AirPlay outputs with per-speaker volume bars and venue EQ presets" loading="lazy">
         <figcaption><div class="ft">Speakers</div><div class="fd">Toggle AirPlay outputs, mix per-speaker volume with ←→, pick a venue EQ preset, and see routes verified against network truth.</div></figcaption>
       </figure>
