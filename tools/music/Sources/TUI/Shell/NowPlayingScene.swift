@@ -51,6 +51,10 @@ final class NowPlayingScene: Scene {
     private let appQueue: AppQueueStore
     private let status: StatusStore
     private let actions: ActionRunner
+    // REST fallback for tracks with no embedded artwork (see NowArtwork.swift).
+    // nil when the user isn't signed in / no dev token configured — the token-
+    // less path then falls straight to the gradient, exactly today's behavior.
+    private let restArtworkAPI: RESTAPIBackend?
     private var cursor = 0
     private var scroll = 0
     private var rows: [TrackListEntry] = []
@@ -103,12 +107,37 @@ final class NowPlayingScene: Scene {
     // BYTES, not a caller-supplied label like the track name).
     private var idCache: [String: UInt32] = [:]
 
+    // REST artwork fallback (reached only when the poller's embedded extraction
+    // found nothing for the current track — see render()'s art ladder). The
+    // same store class the Library/Playlists hero panes use, so Now's covers
+    // go through the identical fetch/cache/render path; this scene just owns
+    // its own instance, like every other art scene. `restArt`/`restAttempted`/
+    // `restInFlight` are tick()-thread-only (drained from the locked inbox,
+    // the same discipline as every other background-fetch cache here);
+    // `restInbox`/`artDirty` are the cross-thread handoff, guarded by artLock.
+    private let artwork = ArtworkStore()
+    // albumKey -> the library album's REST id + {w}x{h} artwork template. The
+    // id is what ArtworkStore is keyed on, so a cover the Library tab already
+    // fetched is a disk-cache HIT here rather than a second download.
+    private var restArt: [String: (id: String, url: String)] = [:]
+    // Tried-once set, keyed by TRACK (not album): Apple's library search misses
+    // some titles outright (see NowArtwork.swift), so an album whose first
+    // played track can't be resolved still gets a chance on the next track —
+    // one attempt per track, and none at all once the album's cover is cached
+    // in `restArt`. tick()-thread only, like restInFlight.
+    private var restAttempted: Set<String> = []
+    private var restInFlight: Set<String> = []
+    private let artLock = NSLock()
+    private var restInbox: [(track: String, album: String, hit: (id: String, url: String)?)] = []
+    private var artDirty = false
+
     init(backend: AppleScriptBackend, appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner,
-         kittyEnabled: Bool = false) {
+         restArtworkAPI: RESTAPIBackend? = nil, kittyEnabled: Bool = false) {
         self.backend = backend
         self.appQueue = appQueue
         self.status = status
         self.actions = actions
+        self.restArtworkAPI = restArtworkAPI
         self.kittyEnabled = kittyEnabled
     }
 
@@ -188,10 +217,52 @@ final class NowPlayingScene: Scene {
         }
         if cursor >= rows.count { cursor = max(0, rows.count - 1) }
 
+        var changed = false
+
+        // REST artwork fallback: reached only when the poller found NO embedded
+        // artwork for this track (extractArtwork returned nothing — true of
+        // every track on "People's Instinctive Travels a") and both auth tokens
+        // are configured. Kicked off-thread: the lookup is up to three network
+        // round-trips (see NowArtwork.swift) and must never touch tick()'s or
+        // render()'s latency. The result lands in restInbox under artLock — the
+        // same inbox+NSLock handoff as Library/Playlists' artMap — and render()
+        // turns a hit into pixels via ArtworkStore, which fetches on its own
+        // serial queue and signals back through artDirty.
+        if case .active(let np) = snapshot.outcome, let api = restArtworkAPI,
+           snapshot.artLines.isEmpty, snapshot.artPath == nil,
+           !np.album.isEmpty, !np.artist.isEmpty {
+            let albumKey = nowAlbumKey(album: np.album, artist: np.artist)
+            let trackTag = trackKey(title: np.track, artist: np.artist)
+            if restArt[albumKey] == nil, !restAttempted.contains(trackTag), !restInFlight.contains(trackTag) {
+                restInFlight.insert(trackTag)
+                Thread.detachNewThread { [weak self] in
+                    let hit = lookupAlbumArtwork(api: api, title: np.track, artist: np.artist, album: np.album)
+                    guard let self else { return }
+                    self.artLock.lock()
+                    self.restInbox.append((trackTag, albumKey, hit))
+                    self.artLock.unlock()
+                }
+            }
+        }
+        artLock.lock()
+        let landed = restInbox; restInbox = []
+        let artLanded = artDirty; artDirty = false
+        artLock.unlock()
+        for (trackTag, albumKey, hit) in landed {
+            // Recorded on a MISS too, so an unresolvable track isn't re-searched
+            // every second for the rest of the session (same negative-cache
+            // intent as ArtworkStore's `failed`). A hit caches under the ALBUM,
+            // so the rest of that album needs no lookup at all.
+            restAttempted.insert(trackTag)
+            restInFlight.remove(trackTag)
+            if let hit { restArt[albumKey] = hit }
+            changed = true
+        }
+        if artLanded { changed = true }
+
         // Shuffle/repeat: drain the background inbox, then kick a fresh fetch
         // every ~2s. A fetch that started before the user's last toggle is
         // stale (would revert the optimistic update), so it's dropped.
-        var changed = false
         modesLock.lock()
         let freshModes = inboxModes; inboxModes = nil
         modesLock.unlock()
@@ -284,69 +355,49 @@ final class NowPlayingScene: Scene {
         // the lines path below prints pre-rendered text at however wide it
         // was extracted, unaffected by gw.
         let gw = twoPane ? leftW : 44
-        // Square-equivalent rect every branch below must agree on — same
-        // computation as the hero panes' `pc`/`pr`, computed once here since
-        // all four branches (kitty/lines/gradient/none) need to agree on how
-        // far `my` (the metadata start row) advances afterward.
-        let (artPC, artPR) = kittySquareRect(maxCols: gw, maxRows: artRows, cellW: frame.cellW, cellH: frame.cellH)
-        var kittyID: UInt32? = nil
-        var kittyTransmit: String? = nil
-        if kittyEnabled, showArt, artRows > 0, let path = snapshot.artPath {
-            if let (id, escape) = kittyIdentity(forPath: path) {
-                kittyID = id
-                kittyTransmit = escape
-            }
-        }
-        if let id = kittyID {
-            let current = (id: id, row: frame.bodyY, col: leftX, cols: artPC, rows: artPR)
-            if let last = lastPlaced, last == current {
-                // Unchanged: the placement from a prior frame is still on
-                // screen — emit nothing (spaces would flicker under the image).
-            } else {
-                if let last = lastPlaced { out += kittyDeleteEscape(id: last.id) }
-                // Erase the full reserved box (artRows) — safe even though
-                // only artPR rows are actually placed; erasing less would
-                // risk a stale row if a resize shrinks artPR between frames.
-                let blank = String(repeating: " ", count: gw)
-                for i in 0..<artRows {
-                    out += ANSICode.moveTo(row: frame.bodyY + i, col: leftX) + blank
+        // The art source ladder, in priority order. EMBEDDED FIRST: the poller
+        // has already extracted it (no network, no token, no wait), and it is
+        // the track's own cover rather than a title+artist guess. REST SECOND:
+        // when the track carries no embedded artwork at all — "Push It Along"
+        // and every other track on People's Instinctive Travels report `count
+        // of artworks == 0` — resolve the same library album the Library tab
+        // renders and hand it to the same ArtworkStore, keyed on the same
+        // library album id, so both tabs read the same cached bytes. GRADIENT
+        // LAST (artBlock stays nil): no token, no match, or still in flight.
+        //
+        // Everything below the source choice is the shared hero ladder
+        // (renderArtHero) that Library/Playlists/Radio already use — this tab
+        // used to hand-roll its own copy of it. ArtworkStore.block fetches on
+        // its own serial queue and signals via onReady; nothing here blocks.
+        var artBlock: ArtBlock? = nil
+        if showArt, artRows > 0 {
+            if kittyEnabled, let path = snapshot.artPath, let (id, escape) = kittyIdentity(forPath: path) {
+                artBlock = .kitty(id: id, transmit: escape)
+            } else if !artLines.isEmpty {
+                artBlock = .lines(artLines)
+            } else if let hit = restArt[nowAlbumKey(album: np.album, artist: np.artist)] {
+                artBlock = artwork.block(key: hit.id,
+                                         url: ArtworkStore.resolveURL(hit.url, width: 300, height: 300),
+                                         width: gw, height: artRows,
+                                         kitty: kittyEnabled && gw > 0) { [weak self] in
+                    guard let self else { return }
+                    self.artLock.lock(); self.artDirty = true; self.artLock.unlock()
                 }
-                out += kittyTransmit ?? ""
-                out += ANSICode.moveTo(row: frame.bodyY, col: leftX) + kittyPlaceEscape(id: id, cols: artPC, rows: artPR)
-                lastPlaced = current
             }
-        } else if !artLines.isEmpty {
-            if let last = lastPlaced { out += kittyDeleteEscape(id: last.id); lastPlaced = nil }
-            // Cap to artPR (the square-equivalent height), not the full
-            // reserved artRows box — advancing `my` below by artRows while
-            // only drawing up to artPR left a dead gap before the track
-            // title. Chafa is extracted upstream at a fixed 44x22, already
-            // at/under artPR (22) on the user's terminal, so this cap is
-            // normally a no-op; it only bites on narrower terminals.
-            let linesRows = min(artLines.count, artPR)
-            for i in 0..<linesRows {
-                out += ANSICode.moveTo(row: frame.bodyY + i, col: leftX) + "\(artLines[i])\(ANSICode.reset)"
-            }
-        } else if showArt {
-            // No usable art for this track (e.g. zero `artworks`, like "Push
-            // It Along") — the same gradient placeholder the heroes show,
-            // squared to the exact rect real art would occupy so the layout
-            // doesn't jump between a track with art and one without.
-            if let last = lastPlaced { out += kittyDeleteEscape(id: last.id); lastPlaced = nil }
-            let gradient = gradientBlock(name: np.track + np.artist, width: artPC, height: artPR)
-            for (i, line) in gradient.enumerated() {
-                out += ANSICode.moveTo(row: frame.bodyY + i, col: leftX) + line
-            }
-        } else {
-            if let last = lastPlaced { out += kittyDeleteEscape(id: last.id); lastPlaced = nil }
         }
+        let (afterArtY, placed) = renderArtHero(artBlock: artBlock,
+                                                gradientSeedText: np.track + np.artist,
+                                                gw: gw, gh: artRows, x: leftX, y: frame.bodyY,
+                                                cellW: frame.cellW, cellH: frame.cellH,
+                                                lastPlaced: lastPlaced, into: &out)
+        lastPlaced = placed
 
         // --- Left pane: metadata below the art ---
-        // Advances by artPR (what was actually drawn), not artRows (the full
-        // reserved box) — advancing by artRows left a 9-row dead gap before
-        // the track title once artRows (the Now tab's now-unclamped height)
-        // grew past artPR (the art's true square-clamped height).
-        var my = frame.bodyY + artPR + 1
+        // renderArtHero advances by the square-equivalent height it actually
+        // drew (pr), not the full reserved `artRows` box — advancing by
+        // artRows left a 9-row dead gap before the track title once artRows
+        // grew past pr.
+        var my = afterArtY + 1
         let metaW = leftW
         let playIcon = np.state == "playing" ? "\u{25B6}" : "\u{23F8}"
         out += ANSICode.moveTo(row: my, col: leftX)

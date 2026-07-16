@@ -119,6 +119,24 @@ struct RESTAPIBackend {
         return parseLibraryAlbums(from: data)   // the relationship returns album objects
     }
 
+    /// The library album a library song belongs to, via the song's `albums`
+    /// relationship. One targeted request that yields the SAME album object
+    /// (id + artwork) `libraryAlbums()` streams to the Library tab — the Now
+    /// tab's route from a playing track to the Library tab's own cover, since
+    /// `/v1/me/library/search` can't reliably resolve an album by name (probed
+    /// live 2026-07-15: it matches album NAME only, never artistName, and even
+    /// an exact name misses — "People's Instinctive Travels a" returns nothing
+    /// while the single word "instinctive" returns the album).
+    func libraryAlbumForSong(songID: String) async throws -> LibraryAlbum? {
+        guard userToken != nil else { throw AuthError.userTokenRequired }
+        let (data, status) = try await get(librarySongAlbumsPath(songID: songID))
+        guard (200...299).contains(status) else {
+            if status == 401 || status == 403 { throw AuthError.userTokenExpired(status) }
+            throw APIError.requestFailed(status)
+        }
+        return parseLibraryAlbums(from: data).first   // the relationship returns album objects
+    }
+
     // MARK: - Library Operations (require user token)
 
     func addToLibrary(songIDs: [String]) async throws {
@@ -387,6 +405,10 @@ func libraryArtistsPath(limit: Int, offset: Int) -> String {
 }
 func artistAlbumsPath(artistID: String) -> String {
     "/v1/me/library/artists/\(artistID)/albums?limit=100"
+}
+/// A library song's `albums` relationship — one album per song, so no paging.
+func librarySongAlbumsPath(songID: String) -> String {
+    "/v1/me/library/songs/\(songID)/albums"
 }
 func parseLibraryArtists(from data: Data) -> [LibraryArtist] {
     parseLibraryDataArray(from: data).map { obj in

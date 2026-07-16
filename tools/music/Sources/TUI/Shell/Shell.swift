@@ -1,6 +1,20 @@
 // tools/music/Sources/TUI/Shell/Shell.swift
 import Foundation
 
+/// The REST backend the art surfaces use for real cover artwork, or nil when
+/// the user isn't signed in / no developer token is configured. Artwork is
+/// decoration: every caller treats nil as "keep the gradient placeholder", so
+/// a token-less user sees no error and no dead surface — never a thrown or
+/// toasted failure. Local work only (config read + JWT sign, no network), so
+/// it's safe on the startup path. Shared by the Now tab's embedded-artwork
+/// fallback and the Playlists hero covers, which had separate copies of this
+/// exact gate.
+func makeArtworkAPI() -> RESTAPIBackend? {
+    let auth = AuthManager()
+    guard let devToken = try? auth.requireDeveloperToken(), let userToken = auth.userToken() else { return nil }
+    return RESTAPIBackend(developerToken: devToken, userToken: userToken, storefront: auth.storefront())
+}
+
 func runShell() {
     let backend = AppleScriptBackend()
     let store = NowPlayingStore()
@@ -14,8 +28,13 @@ func runShell() {
     // edge #5) and threaded into every art-rendering scene.
     let kittyEnabled = kittyGraphicsSupported(env: ProcessInfo.processInfo.environment)
 
+    // Now's REST artwork fallback, for tracks whose embedded artwork is absent
+    // (the Library tab resolves those covers from REST and always has). Built
+    // once at startup on the same both-tokens gate Playlists' hero covers use;
+    // nil (no token) simply leaves Now on embedded-or-gradient — its exact
+    // pre-REST behavior, no error, no dead tab.
     let router = Router(root: .nowPlaying)
-    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions, kittyEnabled: kittyEnabled)]
+    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions, restArtworkAPI: makeArtworkAPI(), kittyEnabled: kittyEnabled)]
     // Declaration order IS the tab strip order and the 1-5 digit shortcuts.
     // Ordered by how often the user reaches for them: Now, then the browse
     // surfaces, then Speakers last (set once, rarely touched mid-session).
@@ -45,17 +64,10 @@ func runShell() {
                 status.post("No playlists found.", error: true)
                 return nil
             }
-            let auth = AuthManager()
-            var artworkAPI: RESTAPIBackend? = nil
-            if let devToken = try? auth.requireDeveloperToken(), auth.userToken() != nil {
-                artworkAPI = RESTAPIBackend(developerToken: devToken,
-                                            userToken: auth.userToken(),
-                                            storefront: auth.storefront())
-            }
             let scene = PlaylistsScene(backend: backend,
                                        playlists: names,
                                        subscriptionNames: fetched.subscription,
-                                       sources: makePlaylistDataSources(backend: backend, names: names, artworkAPI: artworkAPI),
+                                       sources: makePlaylistDataSources(backend: backend, names: names, artworkAPI: makeArtworkAPI()),
                                        appQueue: appQueue,
                                        status: status,
                                        actions: actions,
