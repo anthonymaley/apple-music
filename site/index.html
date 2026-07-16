@@ -44,7 +44,6 @@ body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'JetB
 a{color:var(--cyan);text-decoration:none;transition:color .15s;}
 a:hover{color:var(--accent);}
 ::selection{background:rgba(63,224,122,.22);color:#fff;}
-@keyframes blink{0%,48%{opacity:1;}49%,100%{opacity:0;}}
 
 .wrap{max-width:1180px;margin:0 auto;padding-left:26px;padding-right:26px;}
 .rule{display:flex;align-items:baseline;gap:14px;}
@@ -171,36 +170,54 @@ a:hover{color:var(--accent);}
 └──────────────────────────────────────────────────────┘</pre>
   </section>
 
-  <!-- ===== TALK / NATURAL LANGUAGE ===== -->
+  <!-- ===== TWO WAYS: COMMAND + NATURAL LANGUAGE ===== -->
   <section id="talk" class="wrap reveal" style="padding-top:58px;padding-bottom:44px;">
-    <div class="rule" style="margin-bottom:8px;"><h2>♫ Or just talk to it</h2><div class="ln"></div></div>
-    <p style="margin:0 0 30px;color:var(--muted);font-size:15px;max-width:640px;">Everything the TUI does, in one breath. Claude composes the right sequence of CLI calls: searching, creating playlists, routing to speakers, sharing.</p>
+    <div class="rule" style="margin-bottom:8px;"><h2>♫ Two ways to drive it</h2><div class="ln"></div></div>
+    <p style="margin:0 0 30px;color:var(--muted);font-size:15px;max-width:660px;">Type a command when you know what you want. Ask Claude when the job spans search, playback, routing, and playlists — it composes the calls for you.</p>
 
-    <div class="talkgrid" style="display:grid;grid-template-columns:1.15fr .85fr;gap:18px;align-items:stretch;">
-      <div style="border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,#0c1119,#0a0e14);overflow:hidden;box-shadow:0 30px 70px -44px rgba(0,0,0,.8);">
+    <div class="talkgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:stretch;">
+
+      <!-- Direct: you type the command -->
+      <div style="display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,#0c1119,#0a0e14);overflow:hidden;box-shadow:0 30px 70px -44px rgba(0,0,0,.8);">
         <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.015);">
           <span class="d1" style="width:10px;height:10px;border-radius:50%;display:inline-block;"></span>
           <span class="d2" style="width:10px;height:10px;border-radius:50%;display:inline-block;"></span>
           <span class="d3" style="width:10px;height:10px;border-radius:50%;display:inline-block;"></span>
-          <span style="margin-left:8px;color:var(--dim);font-size:12px;">claude — /music</span>
+          <span style="margin-left:8px;color:var(--dim);font-size:12px;">music — terminal · you type it</span>
         </div>
-        <div style="padding:24px 24px 26px;font-size:15px;line-height:1.6;min-height:190px;">
-          <div style="color:var(--cyan);font-size:13px;margin-bottom:12px;">you ▸</div>
-          <div style="color:#fff;font-size:19px;line-height:1.5;min-height:58px;"><span id="typed"></span><span style="display:inline-block;width:9px;height:19px;background:var(--accent);margin-left:3px;vertical-align:-3px;animation:blink 1.05s steps(1) infinite;"></span></div>
-          <div id="ack" style="visibility:hidden;">
-            <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--line);color:var(--accent);font-size:13px;">claude ▸</div>
-            <div id="ackText" style="margin-top:8px;color:var(--muted);font-size:14.5px;line-height:1.55;"></div>
+        <div style="padding:22px 22px 24px;font-size:13.5px;line-height:1.85;flex:1;">
+          <div><span style="color:var(--accent);">$</span> <span style="color:var(--text);">music search "gypsy woman"</span></div>
+          <div style="color:var(--muted);">&nbsp;1&nbsp; Gypsy Woman — Crystal Waters</div>
+          <div style="color:var(--muted);">&nbsp;2&nbsp; Gypsy Woman (She's Homeless)</div>
+          <div style="color:var(--muted);">&nbsp;3&nbsp; Gipsy Woman — Hyphen Hyphen</div>
+          <div style="margin-top:15px;"><span style="color:var(--accent);">$</span> <span style="color:var(--text);">music play 1</span></div>
+          <div style="color:var(--muted);">▶ Gypsy Woman — Crystal Waters</div>
+          <div style="margin-top:15px;"><span style="color:var(--accent);">$</span> <span style="color:var(--text);">music now</span></div>
+          <div style="color:var(--muted);">▶ Gypsy Woman · Kitchen <span style="color:var(--cyan);">[60]</span></div>
+        </div>
+      </div>
+
+      <!-- Claude: you describe the outcome -->
+      <div style="display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,#0c1119,#0a0e14);overflow:hidden;box-shadow:0 30px 70px -44px rgba(0,0,0,.8);">
+        <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.015);">
+          <span class="d1" style="width:10px;height:10px;border-radius:50%;display:inline-block;"></span>
+          <span class="d2" style="width:10px;height:10px;border-radius:50%;display:inline-block;"></span>
+          <span class="d3" style="width:10px;height:10px;border-radius:50%;display:inline-block;"></span>
+          <span style="margin-left:8px;color:var(--dim);font-size:12px;">claude — /music · you describe it</span>
+        </div>
+        <div style="padding:22px 22px 24px;flex:1;">
+          <div style="color:var(--cyan);font-size:12px;margin-bottom:7px;letter-spacing:.04em;">you ▸</div>
+          <div style="color:#fff;font-size:16px;line-height:1.5;">Play Kid A in the kitchen and living room at 60%, then shuffle.</div>
+          <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line);color:var(--accent);font-size:12px;margin-bottom:10px;letter-spacing:.04em;">claude ▸</div>
+          <div style="color:var(--dim);font-size:12.5px;letter-spacing:.05em;margin-bottom:12px;">searched · played · routed · shuffled</div>
+          <div style="font-size:13.5px;line-height:1.85;">
+            <div style="color:var(--muted);">Kid A — Radiohead</div>
+            <div style="color:var(--muted);">Kitchen <span style="color:var(--cyan);">[60]</span> · Living Room <span style="color:var(--cyan);">[60]</span> · shuffle</div>
+            <div style="color:var(--muted);"><span style="color:var(--accent);">✓</span> both routes verified</div>
           </div>
         </div>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:12px;">
-        <div style="border:1px solid var(--line);border-radius:11px;background:var(--panel);padding:15px 17px;color:var(--muted);font-size:13.5px;line-height:1.55;">"Switch to my AirPods and turn it down to 30."</div>
-        <div style="border:1px solid var(--line);border-radius:11px;background:var(--panel);padding:15px 17px;color:var(--muted);font-size:13.5px;line-height:1.55;">"Add the bedroom to the group and turn the kitchen down to 40."</div>
-        <div style="border:1px solid var(--line);border-radius:11px;background:var(--panel);padding:15px 17px;color:var(--muted);font-size:13.5px;line-height:1.55;">"What's new from Radiohead? Make a playlist of the best ones."</div>
-        <div style="border:1px solid var(--line);border-radius:11px;background:var(--panel);padding:15px 17px;color:var(--muted);font-size:13.5px;line-height:1.55;">"Take the current track, find records in this style, and shuffle them."</div>
-        <div style="border:1px dashed var(--line);border-radius:11px;padding:13px 17px;color:var(--dim);font-size:12.5px;">Claude handles the orchestration. No per-action commands to memorize.</div>
-      </div>
     </div>
   </section>
 
@@ -400,41 +417,6 @@ a:hover{color:var(--accent);}
 
 <script>
 (function(){
-  var prompts = [
-    { q: "Play Kid A by Radiohead in the kitchen and living room at 60%.",
-      a: "Routing Kid A to Kitchen [60] and Living Room [60] — both routes verified." },
-    { q: "Play the album Crush by Floating Points in the office.",
-      a: "Queued Crush (12 tracks) as its own queue on Office [45] — route verified." },
-    { q: "Look at Working Vibes, take the last ten tracks, shuffle them into a new playlist, and play it on the kitchen and Sonos Arc at 60%.",
-      a: "Created “Working Vibes — Late” (10 tracks), shuffled, now playing on Kitchen + Sonos Arc [60]." },
-    { q: "Take the current track and find new records that match this style. Put them in a playlist and shuffle them.",
-      a: "Found 12 records in a similar deep-house vein — built “In This Style” and shuffled it." },
-    { q: "Switch to my AirPods and turn it down to 30.",
-      a: "Switched output to AirPods only, volume 30." }
-  ];
-  var typed = document.getElementById('typed');
-  var ack = document.getElementById('ack');
-  var ackText = document.getElementById('ackText');
-  var idx = 0, pos = 0;
-  function tick(){
-    var cur = prompts[idx];
-    if (pos <= cur.q.length){
-      typed.textContent = cur.q.slice(0, pos);
-      ack.style.visibility = 'hidden';
-      pos++;
-      setTimeout(tick, 42);
-    } else {
-      ackText.textContent = cur.a;
-      ack.style.visibility = 'visible';
-      setTimeout(function(){
-        idx = (idx + 1) % prompts.length;
-        pos = 0;
-        tick();
-      }, 3200);
-    }
-  }
-  tick();
-
   if (typeof IntersectionObserver !== 'undefined'){
     var io = new IntersectionObserver(function(entries){
       entries.forEach(function(e){
