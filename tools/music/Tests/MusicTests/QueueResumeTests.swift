@@ -111,12 +111,12 @@ final class QueueResumeTests: XCTestCase {
     }
 
     func testQueueStoreCreatesIntermediateDirectories() throws {
-        let nested = NSTemporaryDirectory() + "queue-store-nested-\(UUID().uuidString)/sub/queue.json"
-        defer { try? FileManager.default.removeItem(atPath: NSTemporaryDirectory() + "queue-store-nested") }
+        let dir = NSTemporaryDirectory() + "queue-store-nested-\(UUID().uuidString)"
+        let nested = dir + "/sub/queue.json"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
         let store = QueueStore(path: nested)
         try store.save(samplePersisted())
         XCTAssertTrue(FileManager.default.fileExists(atPath: nested))
-        try? FileManager.default.removeItem(atPath: (nested as NSString).deletingLastPathComponent)
     }
 
     // MARK: - queueMatches
