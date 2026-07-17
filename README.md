@@ -7,9 +7,10 @@
   /_/ |_/ .__/ .__/_/\__/   /_/  /_/\_,_/___/_/\__/
        /_/  /_/
 
-**Site: [musictui.com](https://musictui.com/)** — demo video, feature tour, install guide.
-                    TUI, Claude Skill and Apple Developer CLI
+              TUI, Claude Skill and Apple Developer CLI
 ```
+
+**Site: [musictui.com](https://musictui.com/)** — demo video, feature tour, install guide.
 
 ![Building since March 2026](https://img.shields.io/badge/building_since-March_2026-blue)
 ![Commits](https://img.shields.io/github/commit-activity/t/anthonymaley/musictui)
