@@ -331,29 +331,13 @@ a:hover{color:var(--accent);}
 
   <!-- ===== FOUR WAYS ===== -->
   <section id="ways" class="wrap reveal" style="padding-top:82px;padding-bottom:40px;">
-    <div class="rule" style="margin-bottom:8px;"><h2>Four ways to use it</h2><div class="ln"></div></div>
-    <p style="margin:0 0 34px;color:var(--muted);font-size:15px;max-width:640px;">One entry point, four levels of control. Start with the media keys your Mac already has and go all the way to a scriptable API. Pay only the setup you actually need.</p>
-    <div class="waysgrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:18px;">
-      <div class="waycard">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-          <div style="font-size:15px;color:#fff;font-weight:600;">Media keys</div>
-          <div style="font-size:20px;letter-spacing:2px;color:var(--muted);">⏮ ⏯ ⏭</div>
-        </div>
-        <div style="color:var(--muted);font-size:13.5px;line-height:1.6;min-height:60px;">Transport: play/pause, next, previous. Your keyboard already talks to Apple Music from any app, with nothing installed.</div>
-        <div style="display:flex;gap:8px;margin-top:16px;"><span class="tag good">setup: none</span><span class="tag dim">tokens: none</span></div>
-      </div>
-      <div class="waycard">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-          <div style="font-size:15px;color:#fff;font-weight:600;">Natural language</div>
-          <div style="font-size:13px;color:var(--cyan);">/music</div>
-        </div>
-        <div style="color:var(--muted);font-size:13.5px;line-height:1.6;min-height:60px;">Everything in words. <span style="color:var(--text);">"Play Kid A in the kitchen and living room at 60%."</span> Playback with routing, search, playlists, radio, discovery.</div>
-        <div style="display:flex;gap:8px;margin-top:16px;"><span class="tag">setup: build CLI</span><span class="tag dim">tokens: normal</span></div>
-      </div>
+    <div class="rule" style="margin-bottom:8px;"><h2>Three ways to use it</h2><div class="ln"></div></div>
+    <p style="margin:0 0 34px;color:var(--muted);font-size:15px;max-width:640px;">One binary, and only as much setup as you want. Build the CLI once and it all works with no account; add an Apple Developer key for catalog and library; or drive the whole thing in words from Claude Code.</p>
+    <div class="waysgrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;">
       <div class="waycard">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
           <div style="font-size:15px;color:#fff;font-weight:600;">CLI + TUI</div>
-          <div style="font-size:13px;color:var(--accent);">$ music now</div>
+          <div style="font-size:13px;color:var(--accent);">$ music</div>
         </div>
         <div style="color:var(--muted);font-size:13.5px;line-height:1.6;min-height:60px;">Terminal commands and an interactive tabbed shell: Now, Library, Playlists, Radio, Speakers. Scriptable and fast, no tokens.</div>
         <div style="display:flex;gap:8px;margin-top:16px;"><span class="tag">setup: build CLI</span><span class="tag good">tokens: none</span></div>
@@ -365,6 +349,14 @@ a:hover{color:var(--accent);}
         </div>
         <div style="color:var(--muted);font-size:13.5px;line-height:1.6;min-height:60px;">Full catalog, library, and discovery via MusicKit: search, playlist CRUD, similar tracks, mixes, heavy rotation.</div>
         <div style="display:flex;gap:8px;margin-top:16px;"><span class="tag">setup: + Apple Developer</span><span class="tag good">tokens: none</span></div>
+      </div>
+      <div class="waycard">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <div style="font-size:15px;color:#fff;font-weight:600;">Natural language</div>
+          <div style="font-size:13px;color:var(--cyan);">/music</div>
+        </div>
+        <div style="color:var(--muted);font-size:13.5px;line-height:1.6;min-height:60px;">Everything in words. <span style="color:var(--text);">"Play Kid A in the kitchen and living room at 60%."</span> Playback with routing, search, playlists, radio, discovery.</div>
+        <div style="display:flex;gap:8px;margin-top:16px;"><span class="tag">setup: build CLI</span><span class="tag dim">tokens: normal</span></div>
       </div>
     </div>
   </section>
