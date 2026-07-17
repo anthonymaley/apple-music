@@ -32,8 +32,8 @@ if command -v "$MUSIC_CLI" &>/dev/null; then
         echo "$JSON" | grep -q '"live":true' && LIVE=1 || LIVE=""
         TRACK=$(echo "$JSON" | grep -o '"track":"[^"]*"' | cut -d'"' -f4)
         ARTIST=$(echo "$JSON" | grep -o '"artist":"[^"]*"' | cut -d'"' -f4)
-        SPEAKERS=$(echo "$JSON" | grep -o '"speakers":\[[^]]*\]' | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | paste -sd', ' -)
-        VOLUMES=$(echo "$JSON" | grep -o '"speakers":\[[^]]*\]' | grep -o '"volume":[0-9]*' | cut -d: -f2 | paste -sd', ' -)
+        SPEAKERS=$(echo "$JSON" | grep -o '"speakers":\[[^]]*\]' | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | paste -sd, - | sed 's/,/, /g')
+        VOLUMES=$(echo "$JSON" | grep -o '"speakers":\[[^]]*\]' | grep -o '"volume":[0-9]*' | cut -d: -f2 | paste -sd, - | sed 's/,/, /g')
     fi
 
     [ "$STATE" = "playing" ] && ICON="▶" || ICON="⏸"
