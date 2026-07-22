@@ -10,10 +10,11 @@ import Darwin
 /// now-playing bar advances while the user is idle and input never freezes
 /// waiting on a poll.
 ///
-/// Threading contract: `running` is the only field touched from two threads;
-/// it is guarded by `lock`. The poll cadence is `intervalMs`. On `stop()` the
-/// loop exits after its current iteration and signals `finished`; `stop()`
-/// waits briefly so the main loop can leave raw mode after the poller is idle.
+/// Threading contract: `running` and `desiredArtSize` are the only fields
+/// touched from two threads; both are guarded by `lock`. The poll cadence is
+/// `intervalMs`. On `stop()` the loop exits after its current iteration and
+/// signals `finished`; `stop()` waits briefly so the main loop can leave raw
+/// mode after the poller is idle.
 final class PlaybackPoller {
     private let store: NowPlayingStore
     private let backend: AppleScriptBackend
@@ -22,6 +23,11 @@ final class PlaybackPoller {
     private let intervalMs: UInt32
     private let lock = NSLock()
     private var running = false
+    // Render-published desired art LINES size (cols, rows) — see
+    // setDesiredArtSize(). Cross-thread like `running`: NowPlayingScene
+    // writes it once per render (main thread), tick() reads it once per poll
+    // (poller thread). Default matches the pre-B1 fixed extraction size.
+    private var desiredArtSize: (cols: Int, rows: Int) = (44, 22)
     private let finished = DispatchSemaphore(value: 0)
 
     // Thread-confined working state (poller thread only).
@@ -42,6 +48,12 @@ final class PlaybackPoller {
     // kept alongside it for the Now tab's kitty-graphics path — set/cleared at
     // the same sites as artLines, nil whenever artLines is genuinely empty.
     private var artPath: String? = nil
+    // The sizedArtKey `artLines` was last set for — the mid-track branch
+    // compares against it so a resize BACK to an already-cached size adopts
+    // that size's rendering instead of pinning the previous one (a bare
+    // cache-miss check can't see that case: the cache hits, nothing resolves,
+    // and stale lines survive to the next track).
+    private var artLinesKey = ""
     private var lastContext: ContextQueue? = nil
     private var qEnded = false
     private var endedPlaylist = ""
@@ -61,6 +73,12 @@ final class PlaybackPoller {
     // means "no artwork for this album" (extraction returned nil), same
     // meaning as an empty artCache entry.
     private var artPathCache: [String: String] = [:]
+    // Per-album (nowAlbumKey) marker: this album has been extracted at least
+    // once, whatever the outcome. Lets a sized-lines cache miss on an artless
+    // album (no artPathCache entry) be recognized as "already tried, still no
+    // artwork" WITHOUT re-running AppleScript extraction — a resize should
+    // only ever re-render lines from bytes already on disk, never re-extract.
+    private var artExtracted: Set<String> = []
 
     /// Deterministic per-album temp path so two different albums never share
     /// (and one can never silently overwrite the other's) raw art bytes.
@@ -69,6 +87,15 @@ final class PlaybackPoller {
     /// `private`) so it's directly unit-testable — pure, no I/O.
     func tempArtPath(for artKey: String) -> String {
         "/tmp/music-now-art-\(String(format: "%08x", kittyImageID(forKey: artKey))).dat"
+    }
+
+    /// Lines-cache key: `nowAlbumKey` (album|artist) plus the requested size,
+    /// so a cache hit only fires when both the album AND the exact requested
+    /// size match — a resize re-keys instead of reusing a mismatched size's
+    /// pre-rendered text. `artPathCache` stays keyed by `nowAlbumKey` alone
+    /// (raw bytes don't vary with size). Pure.
+    func sizedArtKey(album: String, artist: String, cols: Int, rows: Int) -> String {
+        "\(nowAlbumKey(album: album, artist: artist))\u{0}\(cols)x\(rows)"
     }
 
     /// Delete every per-album art temp file this poller has written this
@@ -81,6 +108,60 @@ final class PlaybackPoller {
     func cleanupArtFiles() {
         for path in artPathCache.values {
             try? FileManager.default.removeItem(atPath: path)
+        }
+    }
+
+    /// The one place a sizedKey lands in `artCache` — flushes all three art
+    /// structures (plus their backing temp files) once `artCache` passes 64
+    /// entries, the same threshold and flush that used to guard a single
+    /// insert site before sizing split it into three call sites (re-render,
+    /// artless marker, full extraction).
+    private func insertArtCache(sizedKey: String, lines: [String]) {
+        if artCache.count > 64 {
+            cleanupArtFiles()
+            artCache.removeAll()
+            artPathCache.removeAll()
+            artExtracted.removeAll()
+        }
+        artCache[sizedKey] = lines
+    }
+
+    /// The sized-lines cache MISS resolution, shared by both callers in
+    /// tick(): the track-change branch (called after the context fetch, once
+    /// a miss on the new track's sizedKey is already known) and the
+    /// mid-track resize check (called only when a resize freshly misses the
+    /// cache for the CURRENT track's album). Same album, same size, same
+    /// three-way decision either way, so a resize gets identical treatment
+    /// whether it lands on a track boundary or mid-track. Updates
+    /// `artLines`/`artPath` in place; does not touch `store` — the caller's
+    /// existing `store.write` publishes the result.
+    private func resolveArt(artKey: String, sizedKey: String, cols: Int, rows: Int) {
+        if let rawPath = artPathCache[artKey] {
+            // Raw bytes already on disk from a prior extraction (this album,
+            // a different size) — re-render lines at the new size ONLY. No
+            // AppleScript round-trip.
+            let lines = artworkToAscii(path: rawPath, width: cols, height: rows)
+            artLines = lines
+            artPath = rawPath
+            insertArtCache(sizedKey: sizedKey, lines: lines)
+        } else if artExtracted.contains(artKey) {
+            // Already extracted this album once and found no artwork — that
+            // answer doesn't change with size, so don't re-run AppleScript
+            // to learn it again.
+            artLines = []
+            artPath = nil
+            insertArtCache(sizedKey: sizedKey, lines: [])
+        } else {
+            // First sight of this album: the full extract+render round-trip,
+            // at the currently published size. Reachable mid-track only if
+            // the track-change branch somehow never extracted (shouldn't
+            // happen — harmless if it does).
+            let extracted = currentTrackArtLines(width: cols, height: rows, path: tempArtPath(for: artKey))
+            artLines = extracted.lines
+            artPath = extracted.path
+            artExtracted.insert(artKey)
+            insertArtCache(sizedKey: sizedKey, lines: artLines)
+            artPathCache[artKey] = extracted.path
         }
     }
 
@@ -110,6 +191,24 @@ final class PlaybackPoller {
     private func isRunning() -> Bool {
         lock.lock(); defer { lock.unlock() }
         return running
+    }
+
+    /// Called from the render thread (NowPlayingScene) once per frame while
+    /// art is shown. Clamped here too, not just at the call site — a size
+    /// this poller was never designed to extract at should be impossible to
+    /// reach regardless of what the caller passes. Floor matches
+    /// NowPlayingScene's own clampedArtSize (20, 10). Idempotent sets are
+    /// fine: this is two Ints under a lock at render cadence.
+    func setDesiredArtSize(cols: Int, rows: Int) {
+        let clamped = (cols: max(20, cols), rows: max(10, rows))
+        lock.lock(); desiredArtSize = clamped; lock.unlock()
+    }
+
+    /// Poller-thread read of the render-published size. Holds `lock` only to
+    /// copy the tuple — never across extraction.
+    private func readDesiredArtSize() -> (cols: Int, rows: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return desiredArtSize
     }
 
     private func loop() {
@@ -193,21 +292,27 @@ final class PlaybackPoller {
                 lastArtist = np.artist
 
                 // Publish the new track's metadata immediately — with cached art
-                // when the album is known, blank otherwise — so the UI reflects
-                // the change within one poll cycle instead of waiting on the
-                // context fetch + artwork extraction below (the slow chain).
-                let artKey = "\(np.album)\u{0}\(np.artist)"
-                let cachedArt = artCache[artKey]
-                artLines = cachedArt ?? []
+                // when the album+size is known, blank otherwise — so the UI
+                // reflects the change within one poll cycle instead of waiting
+                // on the context fetch + artwork resolution below (the slow
+                // chain). Size is read once here and reused for the rest of
+                // this tick's decision below — a mid-tick resize is not a
+                // thing (the read is on the poller thread; the render thread
+                // publishes size once per its own frame).
+                let artKey = nowAlbumKey(album: np.album, artist: np.artist)
+                let size = readDesiredArtSize()
+                let sizedKey = sizedArtKey(album: np.album, artist: np.artist, cols: size.cols, rows: size.rows)
+                let cachedLines = artCache[sizedKey]
+                artLines = cachedLines ?? []
                 // Look up THIS album's own temp path — never the leftover
                 // value from whatever album was extracted most recently. A
-                // cache hit means extraction won't run below, so artPathCache
-                // must already hold the right answer (set the one time this
-                // album was actually extracted, at a path unique to it); a
-                // genuine miss (first sight of this album) clears it so the
-                // kitty path doesn't show anything while extraction below is
-                // still in flight.
-                artPath = cachedArt != nil ? artPathCache[artKey] : nil
+                // sized-lines cache hit means resolution won't run below, so
+                // artPathCache must already hold the right answer (set the
+                // one time this album was actually extracted, at a path
+                // unique to it); a genuine miss (first sight of this album at
+                // this size) clears it so the kitty path doesn't show
+                // anything while resolution below is still in flight.
+                artPath = cachedLines != nil ? artPathCache[artKey] : nil
                 store.write(snapshot(outcome: .active(np)))
 
                 // When the app owns the queue (a playlist track was picked), the
@@ -231,18 +336,10 @@ final class PlaybackPoller {
                         lastContext = ctx
                     }
                 }
-                if cachedArt == nil {
-                    let extracted = currentTrackArtLines(width: 44, height: 22, path: tempArtPath(for: artKey))
-                    artLines = extracted.lines
-                    artPath = extracted.path
-                    if artCache.count > 64 {
-                        cleanupArtFiles()
-                        artCache.removeAll()
-                        artPathCache.removeAll()
-                    }
-                    artCache[artKey] = artLines
-                    artPathCache[artKey] = extracted.path
+                if cachedLines == nil {
+                    resolveArt(artKey: artKey, sizedKey: sizedKey, cols: size.cols, rows: size.rows)
                 }
+                artLinesKey = sizedKey
 
                 // Queue-end detection: prev playlist's last track ended naturally
                 // and we flipped to library autoplay.
@@ -260,6 +357,31 @@ final class PlaybackPoller {
                 } else if !isLibraryContextName(contextName) {
                     // Re-entered a real context — clear any prior end-of-queue offer.
                     qEnded = false
+                }
+            } else {
+                // Mid-track: a resize can change the published size even
+                // though the album hasn't (track-change above only resolves
+                // once, at whatever size was published then). `artLinesKey`
+                // says which sized rendering `artLines` currently holds; on
+                // any mismatch, adopt the cached rendering when one exists
+                // (covers resizing BACK to an already-rendered size — a bare
+                // cache-miss check left the previous size's lines pinned) or
+                // resolve fresh when it doesn't. Bounds a resize's lag to one
+                // poll interval — B2's acceptance criterion. A full extract
+                // can only trigger here for a never-extracted album, which
+                // shouldn't happen (track-change above already extracted it)
+                // — harmless if it somehow does.
+                let size = readDesiredArtSize()
+                let artKey = nowAlbumKey(album: np.album, artist: np.artist)
+                let sizedKey = sizedArtKey(album: np.album, artist: np.artist, cols: size.cols, rows: size.rows)
+                if artLinesKey != sizedKey {
+                    if let cached = artCache[sizedKey] {
+                        artLines = cached
+                        artPath = artPathCache[artKey]   // nil for artless albums — correct
+                    } else {
+                        resolveArt(artKey: artKey, sizedKey: sizedKey, cols: size.cols, rows: size.rows)
+                    }
+                    artLinesKey = sizedKey
                 }
             }
             store.write(snapshot(outcome: .active(np)))

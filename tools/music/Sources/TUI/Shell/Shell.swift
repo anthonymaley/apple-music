@@ -35,7 +35,8 @@ func runShell() {
     // nil (no token) simply leaves Now on embedded-or-gradient — its exact
     // pre-REST behavior, no error, no dead tab.
     let router = Router(root: .nowPlaying)
-    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions, restArtworkAPI: makeArtworkAPI(), kittyEnabled: kittyEnabled)]
+    var scenes: [SceneID: Scene] = [.nowPlaying: NowPlayingScene(backend: backend, appQueue: appQueue, status: status, actions: actions, restArtworkAPI: makeArtworkAPI(), kittyEnabled: kittyEnabled,
+                                                                  setArtSize: { cols, rows in poller.setDesiredArtSize(cols: cols, rows: rows) })]
     // Declaration order IS the tab strip order and the 1-5 digit shortcuts.
     // Ordered by how often the user reaches for them: Now, then the browse
     // surfaces, then Speakers last (set once, rarely touched mid-session).

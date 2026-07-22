@@ -14,6 +14,10 @@ final class NowArtworkTests: XCTestCase {
         CatalogSong(id: id, title: title, artist: artist, album: album)
     }
 
+    private func catalogAlbum(_ id: String, _ name: String, _ artist: String, artworkURL: String? = nil) -> CatalogAlbum {
+        CatalogAlbum(id: id, name: name, artist: artist, artworkURL: artworkURL)
+    }
+
     // MARK: nowAlbumKey
 
     func testAlbumKeyPartitionsByAlbumAndArtist() {
@@ -113,6 +117,83 @@ final class NowArtworkTests: XCTestCase {
         XCTAssertNil(bestSongMatch([song("i.7", "X", "", "Z")], title: "X", artist: "", album: "Z"))
     }
 
+    // MARK: libraryAlbumSearchTerms — route 4's term policy
+
+    /// The repro album, live-validated 2026-07-21: "instinctive" alone
+    /// resolves the album search, so it must sort ahead of the rest.
+    func testStripsPunctuationKeepsWordsOverThreeCharsLongestFirst() {
+        XCTAssertEqual(libraryAlbumSearchTerms(forAlbum: "People's Instinctive Travels a"),
+                       ["Instinctive", "People's"])
+    }
+
+    /// A trailing comma or wrapping parens would make the token unmatchable —
+    /// stripped before the length filter, not after (so "Sleeps," still
+    /// counts as length 6, not 7).
+    func testStripsLeadingAndTrailingPunctuationPerWord() {
+        XCTAssertEqual(libraryAlbumSearchTerms(forAlbum: "Sleeps, and (Dreams)"),
+                       ["Sleeps", "Dreams"])
+    }
+
+    /// "a", "and", "of" — anything len <= 3 carries no search signal and is
+    /// dropped outright, not merely deprioritized.
+    func testDropsWordsOfLengthThreeOrLess() {
+        XCTAssertEqual(libraryAlbumSearchTerms(forAlbum: "Cool Jam Vibe"), ["Cool", "Vibe"])
+    }
+
+    /// More than two qualifying words: only the two longest survive, one
+    /// request each, matching route 3's two-request ceiling.
+    func testCapsAtTheTwoLongestWords() {
+        XCTAssertEqual(libraryAlbumSearchTerms(forAlbum: "Instinctive Travels Along Pathways"),
+                       ["Instinctive", "Pathways"])
+    }
+
+    /// An album name with only one word long enough to qualify yields exactly
+    /// one term rather than padding to two.
+    func testOneQualifyingWordYieldsOneTerm() {
+        XCTAssertEqual(libraryAlbumSearchTerms(forAlbum: "Is This It"), ["This"])
+    }
+
+    /// Every word too short (or no words at all) yields no terms — the album
+    /// route is skipped rather than searching on noise.
+    func testNoQualifyingWordsYieldsNoTerms() {
+        XCTAssertEqual(libraryAlbumSearchTerms(forAlbum: "Is It A"), [])
+        XCTAssertEqual(libraryAlbumSearchTerms(forAlbum: ""), [])
+    }
+
+    // MARK: bestAlbumMatch — album disambiguation (route 4 has no title to lean on)
+
+    func testBestAlbumMatchRequiresArtistAndAlbumBothToMatch() {
+        let hits = [catalogAlbum("l.1", "People's Instinctive Travels a", "A Tribe Called Quest")]
+        let m = bestAlbumMatch(hits, artist: "A Tribe Called Quest", album: "People's Instinctive Travels a")
+        XCTAssertEqual(m?.id, "l.1")
+    }
+
+    func testBestAlbumMatchIsCaseAndWhitespaceInsensitive() {
+        let hits = [catalogAlbum("l.2", " PEOPLE'S Instinctive Travels a ", "a tribe called QUEST")]
+        let m = bestAlbumMatch(hits, artist: "A Tribe Called Quest", album: "People's Instinctive Travels a")
+        XCTAssertEqual(m?.id, "l.2")
+    }
+
+    // MARK: bestAlbumMatch — refusals (a gradient beats wrong art)
+
+    func testBestAlbumMatchRefusesArtistMismatch() {
+        let hits = [catalogAlbum("l.3", "People's Instinctive Travels a", "Someone Else")]
+        XCTAssertNil(bestAlbumMatch(hits, artist: "A Tribe Called Quest", album: "People's Instinctive Travels a"),
+                     "a same-named album by the WRONG artist must never supply the cover")
+    }
+
+    func testBestAlbumMatchRefusesAlbumNameMismatch() {
+        let hits = [catalogAlbum("l.4", "Midnight Marauders", "A Tribe Called Quest")]
+        XCTAssertNil(bestAlbumMatch(hits, artist: "A Tribe Called Quest", album: "People's Instinctive Travels a"),
+                     "route 4 has no title to disambiguate on, so the album name itself must match")
+    }
+
+    func testBestAlbumMatchRefusesEmptyCandidatesAndEmptyArtistOrAlbum() {
+        XCTAssertNil(bestAlbumMatch([], artist: "X", album: "Y"))
+        XCTAssertNil(bestAlbumMatch([catalogAlbum("l.5", "Y", "")], artist: "", album: "Y"))
+        XCTAssertNil(bestAlbumMatch([catalogAlbum("l.6", "", "X")], artist: "X", album: ""))
+    }
+
     // MARK: the relationship path + parsing this route depends on
 
     func testLibrarySongAlbumsPathShape() {
@@ -158,5 +239,40 @@ final class NowArtworkTests: XCTestCase {
         XCTAssertEqual(hits.first?.album, "People's Instinctive Travels a")
         XCTAssertNotNil(bestSongMatch(hits, title: "Push It Along", artist: "A Tribe Called Quest",
                                       album: "People's Instinctive Travels a"))
+    }
+
+    // MARK: library-search album shape route 4 consumes
+
+    /// Route 4 needs artwork out of a library-ALBUMS search response, not just
+    /// id/name/artist — the same `attributes.artwork.url` field
+    /// `parseLibraryAlbums` already reads (verified live 2026-07-21, see file
+    /// header). Without this, every album match would look artless.
+    func testLibraryAlbumSearchParsesIDArtistNameAndArtwork() {
+        let json = """
+        {"results":{"library-albums":{"data":[{"id":"l.Lr0fKV6","attributes":{
+          "name":"People's Instinctive Travels a","artistName":"A Tribe Called Quest",
+          "artwork":{"height":1200,"width":1200,
+            "url":"https://is1-ssl.mzstatic.com/image/thumb/Features115/v4/97/dj.rgkkvazm.jpg/{w}x{h}bb.jpg"}}}]}}}
+        """.data(using: .utf8)!
+        let hits = parseSearchResults(from: json, types: [.albums], library: true).albums
+        XCTAssertEqual(hits.first?.id, "l.Lr0fKV6")
+        XCTAssertEqual(hits.first?.artist, "A Tribe Called Quest")
+        XCTAssertEqual(hits.first?.name, "People's Instinctive Travels a")
+        XCTAssertNotNil(bestAlbumMatch(hits, artist: "A Tribe Called Quest",
+                                       album: "People's Instinctive Travels a"))
+        XCTAssertEqual(ArtworkStore.resolveURL(hits.first?.artworkURL ?? "", width: 300, height: 300),
+                       "https://is1-ssl.mzstatic.com/image/thumb/Features115/v4/97/dj.rgkkvazm.jpg/300x300bb.jpg")
+    }
+
+    /// No artwork attribute at all (the 8/40 rips-with-no-cover case, file
+    /// header) must parse to nil, not an empty string a URL-builder would
+    /// silently mangle.
+    func testLibraryAlbumSearchWithNoArtworkParsesToNilArtworkURL() {
+        let json = """
+        {"results":{"library-albums":{"data":[{"id":"l.abc","attributes":{
+          "name":"Some Live Recording","artistName":"Some Artist"}}]}}}
+        """.data(using: .utf8)!
+        let hits = parseSearchResults(from: json, types: [.albums], library: true).albums
+        XCTAssertNil(hits.first?.artworkURL)
     }
 }

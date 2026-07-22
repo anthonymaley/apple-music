@@ -250,6 +250,7 @@ func playlistCreationRequestBody(name: String, songIDs: [String]) -> [String: An
 
 struct CatalogAlbum {
     let id: String; let name: String; let artist: String
+    var artworkURL: String? = nil
     func toDict() -> [String: Any] { ["id": id, "name": name, "artist": artist] }
 }
 struct CatalogArtist {
@@ -331,7 +332,10 @@ func parseCatalogAlbumObject(_ album: [String: Any]) -> CatalogAlbum {
     return CatalogAlbum(
         id: album["id"] as? String ?? "",
         name: attrs["name"] as? String ?? "Unknown",
-        artist: attrs["artistName"] as? String ?? "Unknown")
+        artist: attrs["artistName"] as? String ?? "Unknown",
+        // Same `attributes.artwork.url` read parseLibraryAlbums already does —
+        // the Now-tab album route (NowArtwork.swift) needs it to accept a hit.
+        artworkURL: (attrs["artwork"] as? [String: Any])?["url"] as? String)
 }
 
 func parseCatalogArtistObject(_ artist: [String: Any]) -> CatalogArtist {

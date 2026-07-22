@@ -38,6 +38,18 @@ func nowPlayingLeftWidth(frameWidth: Int) -> Int {
     return Int((floorW + (capW - floorW) * t).rounded())
 }
 
+/// Square-equivalent clamp for the art LINES size published to the poller
+/// each render — the SAME rows = min(artRows, gw / 2), cols = 2 * rows
+/// formula the kitty rect (`gw`, below) already renders at, so the chafa/mono
+/// lines path follows the same proportions kitty stretches its PNG to.
+/// Floors at (20, 10): `rows` floors at 10, and since `cols` is always
+/// exactly `2 * rows`, that floor already puts `cols` at its own floor of 20.
+/// Pure.
+func clampedArtSize(artRows: Int, gw: Int) -> (cols: Int, rows: Int) {
+    let rows = max(10, min(artRows, gw / 2))
+    return (cols: 2 * rows, rows: rows)
+}
+
 final class NowPlayingScene: Scene {
     let id: SceneID = .nowPlaying
     let tabTitle = "Now"
@@ -55,6 +67,12 @@ final class NowPlayingScene: Scene {
     // nil when the user isn't signed in / no dev token configured — the token-
     // less path then falls straight to the gradient, exactly today's behavior.
     private let restArtworkAPI: RESTAPIBackend?
+    // Publishes the desired art LINES size to PlaybackPoller each render —
+    // Shell wires this to poller.setDesiredArtSize so this scene never needs
+    // to know PlaybackPoller exists (mirrors how the other scene deps below
+    // are injected). No-op default so scenes built without art-size wiring
+    // (e.g. existing tests) don't need to change.
+    private let setArtSize: (Int, Int) -> Void
     private var cursor = 0
     private var scroll = 0
     private var rows: [TrackListEntry] = []
@@ -132,13 +150,15 @@ final class NowPlayingScene: Scene {
     private var artDirty = false
 
     init(backend: AppleScriptBackend, appQueue: AppQueueStore, status: StatusStore, actions: ActionRunner,
-         restArtworkAPI: RESTAPIBackend? = nil, kittyEnabled: Bool = false) {
+         restArtworkAPI: RESTAPIBackend? = nil, kittyEnabled: Bool = false,
+         setArtSize: @escaping (Int, Int) -> Void = { _, _ in }) {
         self.backend = backend
         self.appQueue = appQueue
         self.status = status
         self.actions = actions
         self.restArtworkAPI = restArtworkAPI
         self.kittyEnabled = kittyEnabled
+        self.setArtSize = setArtSize
     }
 
     func artPlacementsInvalidated() { lastPlaced = nil }
@@ -330,10 +350,11 @@ final class NowPlayingScene: Scene {
         let listBottom = frame.bodyY + frame.bodyHeight - 1
 
         // --- Left pane: large album art ---
-        // Art is skipped entirely below ~50 columns: the chafa/mono fallback
-        // is extracted upstream (PlaybackPoller) at a fixed 44 columns (see
-        // the `gw` comment below), and drawing those lines on a narrower
-        // frame would wrap into the next row and corrupt the whole screen.
+        // Art is skipped entirely below ~50 columns: the chafa/mono lines
+        // path renders at `gw` columns (see the `gw` comment below — fixed 44
+        // one-pane, up to 54 two-pane), and drawing lines that wide on a
+        // narrower frame would wrap into the next row and corrupt the whole
+        // screen.
         let showArt = frame.width >= 52
         let artLines = showArt ? snapshot.artLines : []
         // Reserved vertical space for art: metadata (~7 rows) + the control
@@ -348,13 +369,19 @@ final class NowPlayingScene: Scene {
         // Kitty's bound: matches the (now width-adaptive) left column in
         // two-pane mode, same as the hero panes (gw == the pane's own width).
         // One-pane keeps the original fixed rect. The chafa/mono lines path
-        // can't follow this — PlaybackPoller extracts it upstream at a
-        // hardcoded 44x22 (currentTrackArtLines(width: 44, height: 22)), on a
-        // background poller thread that doesn't know the render width. That's
-        // fine: kitty places a PNG and stretches to whatever rect it's given;
-        // the lines path below prints pre-rendered text at however wide it
-        // was extracted, unaffected by gw.
+        // now follows `gw` too, published to the poller below — but bounded
+        // to one poll interval (~1s), not instant: PlaybackPoller runs on its
+        // own background thread and only reads the published size once per
+        // poll, checking the CURRENT track's sized-lines cache on every tick
+        // (not just on a track change), so a mid-track resize misses the
+        // (now stale) sized cache key and re-renders on its next tick. Kitty
+        // has no such lag; it stretches the same transmitted PNG to whatever
+        // rect it's given, instantly.
         let gw = twoPane ? leftW : 44
+        if showArt {
+            let size = clampedArtSize(artRows: artRows, gw: gw)
+            setArtSize(size.cols, size.rows)
+        }
         // The art source ladder, in priority order. EMBEDDED FIRST: the poller
         // has already extracted it (no network, no token, no wait), and it is
         // the track's own cover rather than a title+artist guess. REST SECOND:
